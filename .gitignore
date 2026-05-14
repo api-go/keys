@@ -1,2 +1,4 @@
 .geminiignore
 /keys
+.gemini
+/CODE-FULL.md
