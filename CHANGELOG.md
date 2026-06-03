@@ -1,5 +1,12 @@
 # Changelog: @go/keys
 
+## v1.0.2 (2026-06-02)
+
+### 🛠 Improvements
+- **Security & Compatibility**: 
+    - 修复 AES-CBC / SM4-CBC 算法下 IV 长度处理逻辑，仅在 IV 为 12 字节时进行补零。
+    - 恢复对 16 字节历史遗留 IV 的完整支持，确保与旧版工具生成的加密数据完全兼容。
+
 ## v1.0.1 (2026-05-06)
 
 ### 🚀 Features

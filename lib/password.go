@@ -120,11 +120,19 @@ func createSymmetric(key, keyIv, fileIv []byte, algo string) (*crypto.Symmetric,
 	case "aes-gcm", "gcm", "":
 		return crypto.NewAESGCMWithoutEraseKey(k, v)
 	case "aes-cbc", "cbc":
-		return crypto.NewAESCBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
+		cbcIv := v
+		if len(cbcIv) == 12 {
+			cbcIv = append(cbcIv, 0, 0, 0, 0)
+		}
+		return crypto.NewAESCBCWithoutEraseKey(k, cbcIv)
 	case "sm4-gcm", "sm4":
 		return sm.NewSM4GCMWithoutEraseKey(k, v)
 	case "sm4-cbc":
-		return sm.NewSM4CBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
+		cbcIv := v
+		if len(cbcIv) == 12 {
+			cbcIv = append(cbcIv, 0, 0, 0, 0)
+		}
+		return sm.NewSM4CBCWithoutEraseKey(k, cbcIv)
 	default:
 		return nil, errors.New("unsupported algorithm: " + algo)
 	}
