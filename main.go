@@ -264,7 +264,7 @@ func handlePasswordCmd(keyName string, args []string) {
 			os.Exit(1)
 		}
 		enc, _ := sym.EncryptBytes(data)
-		fmt.Println(encoding.UrlBase64ToString(enc))
+		fmt.Println(encoding.URLBase64(enc))
 	case op == "decrypt":
 		if target == "" {
 			fmt.Println(shell.Red("用法: keys <密钥名> decrypt <路径|密文> [-算法]"))

@@ -351,7 +351,7 @@ func executorPassword(in string) {
 			fmt.Println(shell.Red("Encryption failed: " + err.Error()))
 			return
 		}
-		fmt.Println(shell.Yellow(encoding.UrlBase64ToString(encData)))
+		fmt.Println(shell.Yellow(encoding.URLBase64(encData)))
 
 	case "decrypt":
 		if len(args) < 2 {
