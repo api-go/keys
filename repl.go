@@ -372,7 +372,7 @@ func executorPassword(in string) {
 		dec, err := lib.LoadPassword(activeKeyName, target, activeKey, activeIV, algo)
 		if err != nil || len(dec) == 0 {
 			// Try as raw ciphertext
-			rawData, err2 := encoding.UnUrlBase64FromString(target)
+			rawData, err2 := encoding.UnURLBase64(target)
 			if err2 == nil {
 				dec2, err3 := decryptEphemeral(activeKey, activeIV, algo, rawData)
 				if err3 == nil {

@@ -1,24 +1,24 @@
 module apigo.cc/go/keys
 
 go 1.25.0
-
 require (
-	apigo.cc/go/crypto v1.5.0
-	apigo.cc/go/crypto-sm v1.5.0
-	apigo.cc/go/encoding v1.5.0
-	apigo.cc/go/file v1.5.0
-	apigo.cc/go/safe v1.5.0
-	apigo.cc/go/shell v1.5.0
+	apigo.cc/go/crypto v1.5.2
+	apigo.cc/go/crypto-sm v1.5.3
+	apigo.cc/go/encoding v1.5.3
+	apigo.cc/go/file v1.5.4
+	apigo.cc/go/safe v1.5.1
+	apigo.cc/go/shell v1.5.2
 	github.com/c-bata/go-prompt v0.2.6
 	golang.org/x/term v0.43.0
 )
 
-require apigo.cc/go/jsmod v1.5.0 // indirect
+require apigo.cc/go/jsmod v1.5.3
 
 require (
-	apigo.cc/go/cast v1.5.0 // indirect
-	apigo.cc/go/rand v1.5.0 // indirect
+	apigo.cc/go/cast v1.5.2
+	apigo.cc/go/rand v1.5.2
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
+...
 	github.com/emmansun/gmsm v0.28.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

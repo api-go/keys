@@ -274,7 +274,7 @@ func handlePasswordCmd(keyName string, args []string) {
 		dec, err := lib.LoadPassword(keyName, target, key, iv, algo)
 		if err != nil || len(dec) == 0 {
 			// 尝试作为原始密文解密
-			rawData, err2 := encoding.UnUrlBase64FromString(target)
+			rawData, err2 := encoding.UnURLBase64(target)
 			if err2 == nil {
 				sym, err3 := ks.NewSymmetric(algo)
 				if err3 == nil {
