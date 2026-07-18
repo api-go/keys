@@ -13,11 +13,11 @@ require (
 	golang.org/x/term v0.43.0
 )
 
-require apigo.cc/go/jsmod v1.5.3
+require apigo.cc/go/jsmod v1.5.3 // indirect
 
 require (
-	apigo.cc/go/cast v1.5.3
-	apigo.cc/go/rand v1.5.3
+	apigo.cc/go/cast v1.5.3 // indirect
+	apigo.cc/go/rand v1.5.3 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/emmansun/gmsm v0.28.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
