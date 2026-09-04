@@ -1,4 +1,5 @@
 .geminiignore
 /keys
+/keys_tool
 .gemini
 /CODE-FULL.md
