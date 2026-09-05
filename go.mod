@@ -3,10 +3,10 @@ module apigo.cc/go/keys
 go 1.25.0
 
 require (
-	apigo.cc/go/crypto v1.5.6
-	apigo.cc/go/crypto-sm v1.5.6
-	apigo.cc/go/encoding v1.5.7
-	apigo.cc/go/file v1.5.8
+	apigo.cc/go/crypto v1.5.7
+	apigo.cc/go/crypto-sm v1.5.7
+	apigo.cc/go/encoding v1.5.8
+	apigo.cc/go/file v1.5.9
 	apigo.cc/go/safe v1.5.4
 	apigo.cc/go/shell v1.5.7
 	github.com/c-bata/go-prompt v0.2.6
@@ -16,7 +16,7 @@ require (
 require apigo.cc/go/jsmod v1.5.4 // indirect
 
 require (
-	apigo.cc/go/cast v1.5.6 // indirect
+	apigo.cc/go/cast v1.5.7 // indirect
 	apigo.cc/go/rand v1.5.4 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/emmansun/gmsm v0.28.0 // indirect
