@@ -1,6 +1,6 @@
 # Test Report: @go/keys
 
-## v1.5.9 发布验证（2026-10-26）
+## v1.5.10 发布验证（2026-10-26）
 
 环境：Go 1.26.4、darwin/arm64、Apple M3 Max。
 使用已发布依赖、`GOWORK=off`，无临时 replace。
