@@ -1,9 +1,11 @@
-package lib
+package lib_test
 
 import (
 	"bytes"
 	"os"
 	"testing"
+
+	"apigo.cc/go/keys/lib"
 )
 
 func TestKeystoreAndPassword(t *testing.T) {
@@ -21,7 +23,7 @@ func TestKeystoreAndPassword(t *testing.T) {
 	keyName := "test_key"
 
 	// 1. Create Keystore
-	ks, err := CreateKeystore(keyName, masterPassword)
+	ks, err := lib.CreateKeystore(keyName, masterPassword)
 	if err != nil {
 		t.Fatalf("CreateKeystore failed: %v", err)
 	}
@@ -33,7 +35,7 @@ func TestKeystoreAndPassword(t *testing.T) {
 	ks.Close()
 
 	// 2. Load Keystore
-	ks2, err := LoadKeystore(keyName, masterPassword)
+	ks2, err := lib.LoadKeystore(keyName, masterPassword)
 	if err != nil {
 		t.Fatalf("LoadKeystore failed: %v", err)
 	}
@@ -51,13 +53,13 @@ func TestKeystoreAndPassword(t *testing.T) {
 	pwdName := "db.mysql.root"
 	pwdValue := []byte("123456")
 
-	err = SavePassword(keyName, pwdName, pwdValue, key2, iv2, "aes-gcm")
+	err = lib.SavePassword(keyName, pwdName, pwdValue, key2, iv2, "aes-gcm")
 	if err != nil {
 		t.Fatalf("SavePassword failed: %v", err)
 	}
 
 	// 4. List Passwords
-	pwds, err := ListPasswords(keyName)
+	pwds, err := lib.ListPasswords(keyName)
 	if err != nil {
 		t.Fatalf("ListPasswords failed: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestKeystoreAndPassword(t *testing.T) {
 	}
 
 	// 5. Load Password
-	loadedPwd, err := LoadPassword(keyName, pwdName, key2, iv2, "aes-gcm")
+	loadedPwd, err := lib.LoadPassword(keyName, pwdName, key2, iv2, "aes-gcm")
 	if err != nil {
 		t.Fatalf("LoadPassword failed: %v", err)
 	}
@@ -75,12 +77,12 @@ func TestKeystoreAndPassword(t *testing.T) {
 	}
 
 	// 6. Delete Password
-	err = RemovePassword(keyName, pwdName)
+	err = lib.RemovePassword(keyName, pwdName)
 	if err != nil {
 		t.Fatalf("RemovePassword failed: %v", err)
 	}
 
-	pwds2, _ := ListPasswords(keyName)
+	pwds2, _ := lib.ListPasswords(keyName)
 	if len(pwds2) != 0 {
 		t.Fatalf("Password was not deleted properly")
 	}

@@ -8,7 +8,6 @@ import (
 
 	"apigo.cc/go/crypto"
 	"apigo.cc/go/crypto-sm"
-	"apigo.cc/go/file"
 	"apigo.cc/go/safe"
 )
 
@@ -19,16 +18,15 @@ func PwdNameToPath(pwdName string) string {
 
 // SavePassword encrypts and saves a password value associated with a specific key.
 func SavePassword(keyName, pwdName string, data []byte, activeKey, activeIV []byte, algo string) error {
-	if keyName == "" || pwdName == "" {
-		return errors.New("key name and password name cannot be empty")
+	if err := validateItemName(pwdName); err != nil {
+		return err
 	}
-
-	basePath := GetPasswordPath(keyName)
-	relPath := PwdNameToPath(pwdName)
-	filePath := filepath.Join(basePath, relPath)
-
-	dir := filepath.Dir(filePath)
-	if err := EnsureDir(dir); err != nil {
+	root, err := openStore("passwords", keyName, true)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(pwdName), 0700); err != nil {
 		return err
 	}
 
@@ -37,13 +35,17 @@ func SavePassword(keyName, pwdName string, data []byte, activeKey, activeIV []by
 		return err
 	}
 
-	dummySalt, _ := CryptoRandBytes(16)
+	dummySalt, err := CryptoRandBytes(16)
+	if err != nil {
+		return err
+	}
 
 	sym, err := createSymmetric(activeKey, activeIV, fileIv, algo)
 	if err != nil {
 		return err
 	}
 
+	defer sym.Close()
 	encData, err := sym.EncryptBytes(data)
 	if err != nil {
 		return err
@@ -54,25 +56,28 @@ func SavePassword(keyName, pwdName string, data []byte, activeKey, activeIV []by
 		return err
 	}
 
-	paddingBuf, _ := CryptoRandBytes(cipherPadding)
+	paddingBuf, err := CryptoRandBytes(cipherPadding)
+	if err != nil {
+		return err
+	}
 	finalBuf := append([]byte(nil), header...)
 	finalBuf = append(finalBuf, paddingBuf...)
 	finalBuf = append(finalBuf, encData...)
 
-	return file.WriteBytes(filePath, finalBuf)
+	return writeSecret(root, pwdName, finalBuf, false)
 }
 
 // LoadPassword loads and decrypts a password value.
 func LoadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error) {
-	basePath := GetPasswordPath(keyName)
-	relPath := PwdNameToPath(pwdName)
-	filePath := filepath.Join(basePath, relPath)
-
-	if !file.Exists(filePath) {
-		return nil, errors.New("password not found")
+	if err := validateItemName(pwdName); err != nil {
+		return nil, err
 	}
-
-	data, err := file.ReadBytes(filePath)
+	root, err := openStore("passwords", keyName, false)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	data, err := root.ReadFile(pwdName)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +104,7 @@ func LoadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo stri
 		return nil, err
 	}
 
+	defer sym.Close()
 	dec, err := sym.DecryptBytes(cipherText)
 	if err != nil {
 		// --- 🛡️ 诱饵模式 (Decoy Mode) 🛡️ ---
@@ -111,6 +117,9 @@ func LoadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo stri
 }
 
 func createSymmetric(key, keyIv, fileIv []byte, algo string) (*crypto.Symmetric, error) {
+	if len(key) < 16 {
+		return nil, errors.New("key size is too short, at least 16 bytes required")
+	}
 	k := append([]byte(nil), key...)
 	v := append([]byte(nil), fileIv...)
 	defer safe.ZeroMemory(k)
@@ -126,13 +135,13 @@ func createSymmetric(key, keyIv, fileIv []byte, algo string) (*crypto.Symmetric,
 		}
 		return crypto.NewAESCBCWithoutEraseKey(k, cbcIv)
 	case "sm4-gcm", "sm4":
-		return sm.NewSM4GCMWithoutEraseKey(k, v)
+		return sm.NewSM4GCMWithoutEraseKey(k[:16], v)
 	case "sm4-cbc":
 		cbcIv := v
 		if len(cbcIv) == 12 {
 			cbcIv = append(cbcIv, 0, 0, 0, 0)
 		}
-		return sm.NewSM4CBCWithoutEraseKey(k, cbcIv)
+		return sm.NewSM4CBCWithoutEraseKey(k[:16], cbcIv)
 	default:
 		return nil, errors.New("unsupported algorithm: " + algo)
 	}
@@ -156,37 +165,26 @@ func CryptoRandDecoy(min, max int) []byte {
 
 // RemovePassword deletes a password file.
 func RemovePassword(keyName, pwdName string) error {
-	basePath := GetPasswordPath(keyName)
-	relPath := PwdNameToPath(pwdName)
-	filePath := filepath.Join(basePath, relPath)
-
-	if !file.Exists(filePath) {
-		return errors.New("password not found")
+	if err := validateItemName(pwdName); err != nil {
+		return err
 	}
-
-	return os.Remove(filePath)
+	root, err := openStore("passwords", keyName, false)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Remove(pwdName)
 }
 
-// ListPasswords lists all passwords under a key, returning them as path names.
+// ListPasswords lists password item paths without following symbolic links.
 func ListPasswords(keyName string) ([]string, error) {
-	basePath := GetPasswordPath(keyName)
-	if !file.Exists(basePath) {
-		return nil, nil // No passwords yet
+	root, err := openStore("passwords", keyName, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
-
-	var passwords []string
-	err := filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			rel, err := filepath.Rel(basePath, path)
-			if err == nil {
-				passwords = append(passwords, rel)
-			}
-		}
-		return nil
-	})
-
-	return passwords, err
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return listPasswordFiles(root)
 }

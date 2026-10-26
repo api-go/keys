@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"apigo.cc/go/encoding"
+	"apigo.cc/go/keys/internal/keyagent"
 	"apigo.cc/go/keys/lib"
 	"apigo.cc/go/safe"
 	"apigo.cc/go/shell"
@@ -20,6 +27,36 @@ func main() {
 	}
 
 	arg1 := os.Args[1]
+	if arg1 == "__keys-agent" {
+		if len(os.Args) != 3 {
+			os.Exit(1)
+		}
+		client, err := keyagent.New(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := client.Serve(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if arg1 == "keep-key" || arg1 == "forget-key" {
+		var err error
+		if arg1 == "keep-key" {
+			err = handleKeepKey(os.Args[2:])
+		} else {
+			err = handleForgetKey(os.Args[2:])
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// 1. 特殊全局命令 (以 - 开头)
 	if strings.HasPrefix(arg1, "-") {
@@ -61,11 +98,14 @@ func main() {
 		handleRemoveKeystore(os.Args[2])
 		return
 	case "export":
-		if len(os.Args) < 4 {
-			fmt.Println(shell.Red("用法: keys export <密钥名> <语言>"))
+		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "用法: keys export <密钥名> <语言>")
 			os.Exit(1)
 		}
-		handleExportKeystore(os.Args[2], os.Args[3])
+		if err := handleExportKeystore(os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -116,7 +156,7 @@ func showStatus() {
 func handleListKeystores() {
 	fmt.Println(shell.Cyan("可用密钥列表:"))
 	fmt.Printf("  - %s %s\n", shell.White("default"), shell.Yellow("(内置默认)"))
-	
+
 	files, err := os.ReadDir(lib.GetKeystorePath())
 	if err != nil {
 		fmt.Printf("共 1 个密钥\n")
@@ -145,15 +185,30 @@ func handleCreateKeystore(name string) {
 }
 
 func handleRemoveKeystore(name string) {
-	path := filepath.Join(lib.GetKeystorePath(), name)
-	if err := os.Remove(path); err != nil {
+	if err := lib.RemoveKeystore(name); err != nil {
 		fmt.Println(shell.Red("删除失败: " + err.Error()))
 		os.Exit(1)
 	}
 	fmt.Println(shell.Green("密钥 '" + name + "' 已删除。"))
 }
 
-func handleExportKeystore(name, lang string) {
+func handleExportKeystore(name, lang string) error {
+	if name != "default" {
+		client, err := keyagent.New(lib.GetKeysRootPath())
+		if err != nil && !errors.Is(err, keyagent.ErrUnavailable) {
+			return err
+		}
+		if err == nil {
+			code, err := client.Export(name, lang)
+			if err == nil {
+				_, err = fmt.Fprintln(os.Stdout, code)
+				return err
+			}
+			if !errors.Is(err, keyagent.ErrUnavailable) && !errors.Is(err, keyagent.ErrNotKept) {
+				return err
+			}
+		}
+	}
 	var pwd []byte
 	if name != "default" {
 		pwd = getMasterPassword()
@@ -161,41 +216,40 @@ func handleExportKeystore(name, lang string) {
 	}
 	ks, err := lib.LoadKeystore(name, pwd)
 	if err != nil {
-		fmt.Println(shell.Red("加载失败: " + err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("加载失败: %w", err)
 	}
 	defer ks.Close()
 	key, iv, err := ks.GetRaw()
 	if err != nil {
-		fmt.Println(shell.Red("提取失败: " + err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("提取失败: %w", err)
 	}
+	defer safe.ZeroMemory(key)
+	defer safe.ZeroMemory(iv)
 	code, err := lib.MakeCode(lang, key, iv)
 	if err != nil {
-		fmt.Println(shell.Red("导出失败: " + err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("导出失败: %w", err)
 	}
-	fmt.Println(code)
+	_, err = fmt.Fprintln(os.Stdout, code)
+	return err
 }
 
 func handlePasswordCmd(keyName string, args []string) {
 	op := args[0]
-	
+
 	// 下面这些操作通常需要解密 Key，所以统一获取 master password
 	var pwd []byte
 	if keyName != "default" {
 		pwd = getMasterPassword()
 		defer safe.ZeroMemory(pwd)
 	}
-	
+
 	ks, err := lib.LoadKeystore(keyName, pwd)
 	if err != nil {
-		// --- 🛡️ 诱饵模式: 就算 LoadKeystore 返回随机 Key，这里也会继续运行 ---
 		fmt.Println(shell.Red("密钥解锁失败: " + err.Error()))
 		os.Exit(1)
 	}
 	defer ks.Close()
-	
+
 	key, iv, err := ks.GetRaw()
 	if err != nil {
 		fmt.Println(shell.Red("Key 提取失败: " + err.Error()))
@@ -251,7 +305,7 @@ func handlePasswordCmd(keyName string, args []string) {
 			fmt.Println(shell.Red("用法: keys <密钥名> encrypt <路径|原文> [-算法]"))
 			os.Exit(1)
 		}
-		
+
 		// 尝试作为已有项加载
 		data, err := lib.LoadPassword(keyName, target, key, iv, "aes-gcm")
 		if err != nil || len(data) == 0 {
@@ -270,7 +324,7 @@ func handlePasswordCmd(keyName string, args []string) {
 			fmt.Println(shell.Red("用法: keys <密钥名> decrypt <路径|密文> [-算法]"))
 			os.Exit(1)
 		}
-		
+
 		dec, err := lib.LoadPassword(keyName, target, key, iv, algo)
 		if err != nil || len(dec) == 0 {
 			// 尝试作为原始密文解密
@@ -299,12 +353,12 @@ func getMasterPassword() []byte {
 	if p := os.Getenv("MASTER_PASSWORD"); p != "" {
 		return []byte(p)
 	}
-	fmt.Print("输入主密码: ")
+	fmt.Fprint(os.Stderr, "输入主密码: ")
 	fd := int(os.Stdin.Fd())
 	password, err := term.ReadPassword(fd)
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	if err != nil || len(password) == 0 {
-		fmt.Println(shell.Red("必须输入密码"))
+		fmt.Fprintln(os.Stderr, "必须输入密码")
 		os.Exit(1)
 	}
 	return password
@@ -322,6 +376,9 @@ func printUsage() {
   keys create <名>          创建新密钥
   keys remove <名>          删除密钥
   keys export <名> <语言>   导出混淆代码 (go, php, java, python, js)
+  keys keep-key <名> [--ttl 8h]  解锁并在内存中保留密钥（仅供导出）
+  keys forget-key <名>          清除该密钥的内存缓存
+  keys forget-key --all         清除当前密钥库的全部缓存并停止代理
 
 管理密码 (非交互):
   keys <密钥名> list        列出该密钥下的所有密码项
@@ -338,4 +395,73 @@ func printUsage() {
 环境变量:
   KEYSPATH                  临时指定存储路径
   MASTER_PASSWORD           自动化脚本中传递主密码`)
+}
+
+func handleKeepKey(args []string) error {
+	usage := errors.New("用法: keys keep-key <密钥名> [--ttl 8h]")
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		return usage
+	}
+	name := args[0]
+	options := flag.NewFlagSet("keep-key", flag.ContinueOnError)
+	options.SetOutput(os.Stderr)
+	ttlText := options.String("ttl", "", "可选有效期，例如 8h")
+	if err := options.Parse(args[1:]); err != nil {
+		return err
+	}
+	if options.NArg() != 0 {
+		return usage
+	}
+	var ttl time.Duration
+	ttlProvided := false
+	options.Visit(func(f *flag.Flag) {
+		if f.Name == "ttl" {
+			ttlProvided = true
+		}
+	})
+	if ttlProvided {
+		var err error
+		ttl, err = time.ParseDuration(*ttlText)
+		if err != nil || ttl <= 0 {
+			return errors.New("TTL 必须是正时长，例如 8h")
+		}
+	}
+	if name == "default" {
+		return errors.New("内置 default 密钥无需保留")
+	}
+	pwd := getMasterPassword()
+	defer safe.ZeroMemory(pwd)
+	ks, err := lib.LoadKeystore(name, pwd)
+	safe.ZeroMemory(pwd)
+	if err != nil {
+		return err
+	}
+	defer ks.Close()
+	client, err := keyagent.New(lib.GetKeysRootPath())
+	if err != nil {
+		return err
+	}
+	if err := client.Keep(ks, ttl, client.StartProcess); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "密钥已临时保留，仅用于导出:", name)
+	return nil
+}
+func handleForgetKey(args []string) error {
+	if len(args) != 1 {
+		return errors.New("用法: keys forget-key <密钥名> | --all")
+	}
+	all := args[0] == "--all"
+	if !all && strings.HasPrefix(args[0], "-") {
+		return errors.New("未知 forget-key 选项")
+	}
+	client, err := keyagent.New(lib.GetKeysRootPath())
+	if err != nil {
+		return err
+	}
+	if err := client.Forget(args[0], all); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "内存缓存已清除")
+	return nil
 }

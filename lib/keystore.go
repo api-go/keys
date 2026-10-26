@@ -2,9 +2,7 @@ package lib
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"apigo.cc/go/crypto"
 	"apigo.cc/go/crypto-sm"
@@ -13,8 +11,18 @@ import (
 )
 
 type KeySet struct {
-	Name string
-	buf  *safe.SafeBuf // Holds the 128-byte obfuscated key
+	Name              string
+	buf               *safe.SafeBuf // Holds the 128-byte obfuscated key
+	sourceFingerprint [32]byte
+}
+
+// SourceFingerprint identifies the encrypted file snapshot used to unlock this key.
+// It contains no plaintext key or password material.
+func (k *KeySet) SourceFingerprint() [32]byte {
+	if k == nil {
+		return [32]byte{}
+	}
+	return k.sourceFingerprint
 }
 
 // Close safely erases the memory buffer.
@@ -25,15 +33,15 @@ func (k *KeySet) Close() {
 	k.buf.Close()
 }
 
-// GetRaw extracts the actual 32-byte Key and 12-byte IV from the obfuscated buffer.
+// GetRaw extracts the actual 32-byte Key and 12-16 byte IV from the obfuscated buffer.
 func (k *KeySet) GetRaw() ([]byte, []byte, error) {
 	if k == nil || k.buf == nil {
 		return nil, nil, errors.New("invalid keyset")
 	}
-	
+
 	plain := k.buf.Open()
 	defer plain.Close()
-	
+
 	key, iv, err := UnpackMemoryKey(plain.Data)
 	if err != nil {
 		return nil, nil, err
@@ -60,13 +68,13 @@ func (k *KeySet) NewSymmetric(algo string) (*crypto.Symmetric, error) {
 		}
 		return crypto.NewAESCBCWithoutEraseKey(key, cbcIv)
 	case "sm4-gcm", "sm4":
-		return sm.NewSM4GCMWithoutEraseKey(key, iv[:12])
+		return sm.NewSM4GCMWithoutEraseKey(key[:16], iv[:12])
 	case "sm4-cbc":
 		cbcIv := iv
 		if len(cbcIv) == 12 {
 			cbcIv = append(cbcIv, 0, 0, 0, 0)
 		}
-		return sm.NewSM4CBCWithoutEraseKey(key, cbcIv)
+		return sm.NewSM4CBCWithoutEraseKey(key[:16], cbcIv)
 	default:
 		return nil, errors.New("unsupported algorithm: " + algo)
 	}
@@ -74,28 +82,32 @@ func (k *KeySet) NewSymmetric(algo string) (*crypto.Symmetric, error) {
 
 // CreateKeystore creates a new master key, obfuscates it, encrypts it with the master password, and saves it.
 func CreateKeystore(name string, masterPassword []byte) (*KeySet, error) {
-	if name == "" {
-		return nil, errors.New("key name cannot be empty")
-	}
-
-	keyPath := GetKeystorePath()
-	if err := EnsureDir(keyPath); err != nil {
+	if err := validateKeyName(name); err != nil {
 		return nil, err
 	}
-
-	filePath := filepath.Join(keyPath, name)
-	if file.Exists(filePath) {
-		return nil, errors.New("key exists")
+	if name == "default" {
+		return nil, errors.New("reserved key name")
 	}
+	if len(masterPassword) == 0 {
+		return nil, errors.New("master password is required")
+	}
+	root, err := openStore("keystore", "", true)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 
 	key, err := CryptoRandBytes(32)
 	if err != nil {
 		return nil, err
 	}
+	defer safe.ZeroMemory(key)
 	iv, err := CryptoRandBytes(12)
 	if err != nil {
 		return nil, err
 	}
+
+	defer safe.ZeroMemory(iv)
 
 	// Pack to 128 bytes
 	memKeyBuf, err := PackMemoryKey(key, iv)
@@ -103,17 +115,27 @@ func CreateKeystore(name string, masterPassword []byte) (*KeySet, error) {
 		return nil, err
 	}
 
+	defer safe.ZeroMemory(memKeyBuf)
+
 	// Encrypt the 128 bytes with master password
-	salt, _ := CryptoRandBytes(16)
-	fileIv, _ := CryptoRandBytes(12)
+	salt, err := CryptoRandBytes(16)
+	if err != nil {
+		return nil, err
+	}
+	fileIv, err := CryptoRandBytes(12)
+	if err != nil {
+		return nil, err
+	}
 
 	passCopy := append([]byte(nil), masterPassword...)
+	defer safe.ZeroMemory(passCopy)
 	saltCopy := append([]byte(nil), salt...)
 	sym, err := crypto.NewAESGCMByPassword(passCopy, saltCopy)
 	if err != nil {
 		return nil, err
 	}
-	
+
+	defer sym.Close()
 	encData, err := sym.EncryptBytes(memKeyBuf)
 	if err != nil {
 		return nil, err
@@ -126,20 +148,26 @@ func CreateKeystore(name string, masterPassword []byte) (*KeySet, error) {
 	}
 
 	// Construct final file content: Header (256) + Padding + Ciphertext
-	paddingBuf, _ := CryptoRandBytes(cipherPadding)
-	
+	paddingBuf, err := CryptoRandBytes(cipherPadding)
+	if err != nil {
+		return nil, err
+	}
+
 	finalBuf := append([]byte(nil), header...)
 	finalBuf = append(finalBuf, paddingBuf...)
 	finalBuf = append(finalBuf, encData...)
 
 	// Write raw binary
-	if err := file.WriteBytes(filePath, finalBuf); err != nil {
+	if err := writeSecret(root, name, finalBuf, true); err != nil {
 		return nil, err
 	}
 
+	var fingerprint [32]byte
+	copy(fingerprint[:], crypto.SHA256(finalBuf))
 	return &KeySet{
-		Name: name,
-		buf:  safe.NewSafeBufAndErase(memKeyBuf),
+		sourceFingerprint: fingerprint,
+		Name:              name,
+		buf:               safe.NewSafeBufAndErase(memKeyBuf),
 	}, nil
 }
 
@@ -148,14 +176,18 @@ func LoadKeystore(name string, masterPassword []byte) (*KeySet, error) {
 	if name == "default" {
 		return GetDefaultKeySet(), nil
 	}
-	keyPath := GetKeystorePath()
-	filePath := filepath.Join(keyPath, name)
-
-	if !file.Exists(filePath) {
-		return nil, errors.New("key not found")
+	if err := validateKeyName(name); err != nil {
+		return nil, err
 	}
-
-	data, err := file.ReadBytes(filePath)
+	if len(masterPassword) == 0 {
+		return nil, errors.New("master password is required")
+	}
+	root, err := openStore("keystore", "", false)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}
@@ -178,32 +210,35 @@ func LoadKeystore(name string, masterPassword []byte) (*KeySet, error) {
 	cipherText := data[cipherStart:]
 
 	passCopy := append([]byte(nil), masterPassword...)
+	defer safe.ZeroMemory(passCopy)
 	sym, err := crypto.NewAESGCMByPassword(passCopy, salt)
 	if err != nil {
 		return nil, err
 	}
 
+	defer sym.Close()
 	dec, err := sym.DecryptBytes(cipherText)
 	if err != nil {
-		// --- 🛡️ 诱饵模式 (Decoy Mode) 🛡️ ---
-		// 密码错误不报错，而是返回一个随机生成的 KeySet。
-		// 这会让攻击者无法通过报错来判断暴力破解是否成功。
-		// 同时增加 1.5s 延迟，大幅降低自动化破解效率。
-		time.Sleep(1500 * time.Millisecond)
-		garbage, _ := CryptoRandBytes(MemoryKeySize)
-		return &KeySet{
-			Name: name,
-			buf:  safe.NewSafeBufAndErase(garbage),
-		}, nil
+		return nil, errors.New("invalid master password or corrupted key file")
 	}
+	defer safe.ZeroMemory(dec)
 
 	if len(dec) != MemoryKeySize {
 		return nil, errors.New("corrupted key data (invalid length)")
 	}
 
+	key, iv, err := UnpackMemoryKey(dec)
+	if err != nil {
+		return nil, errors.New("corrupted key data")
+	}
+	safe.ZeroMemory(key)
+	safe.ZeroMemory(iv)
+	var fingerprint [32]byte
+	copy(fingerprint[:], crypto.SHA256(data))
 	return &KeySet{
-		Name: name,
-		buf:  safe.NewSafeBufAndErase(dec),
+		sourceFingerprint: fingerprint,
+		Name:              name,
+		buf:               safe.NewSafeBufAndErase(dec),
 	}, nil
 }
 

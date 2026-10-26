@@ -3,18 +3,17 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/c-bata/go-prompt"
-	"golang.org/x/term"
 	"apigo.cc/go/crypto"
 	"apigo.cc/go/crypto-sm"
 	"apigo.cc/go/encoding"
 	"apigo.cc/go/keys/lib"
 	"apigo.cc/go/safe"
 	"apigo.cc/go/shell"
+	"github.com/c-bata/go-prompt"
+	"golang.org/x/term"
 )
 
 var masterPwd []byte
@@ -68,8 +67,7 @@ func executorKeystore(in string) {
 			fmt.Println(shell.Red("Usage: remove <keyname>"))
 			return
 		}
-		filePath := filepath.Join(lib.GetKeystorePath(), args[1])
-		if err := os.Remove(filePath); err != nil {
+		if err := lib.RemoveKeystore(args[1]); err != nil {
 			fmt.Println(shell.Red("Failed to remove keystore: " + err.Error()))
 			return
 		}
@@ -96,6 +94,8 @@ func executorKeystore(in string) {
 			return
 		}
 
+		defer safe.ZeroMemory(key)
+		defer safe.ZeroMemory(iv)
 		code, err := lib.MakeCode(args[2], key, iv)
 		if err != nil {
 			fmt.Println(shell.Red("Failed to export code: " + err.Error()))
@@ -117,10 +117,10 @@ func executorKeystore(in string) {
 			fmt.Println(shell.Red("Failed to load keystore: " + err.Error()))
 			return
 		}
-		
+
 		key, iv, err := ks.GetRaw()
 		ks.Close()
-		
+
 		if err != nil {
 			fmt.Println(shell.Red("Failed to extract raw key/iv: " + err.Error()))
 			return
@@ -214,7 +214,7 @@ func interactivePasswordMode(keyName string) {
 	if len(pwd) > 0 {
 		safe.ZeroMemory(pwd)
 	}
-	
+
 	if err != nil {
 		fmt.Println(shell.Red("Failed to extract raw key/iv: " + err.Error()))
 		os.Exit(1)
@@ -233,7 +233,7 @@ func startPasswordModeLoop(keyName string, key, iv []byte) {
 	activeIV = iv
 
 	fmt.Println(shell.Cyan("Keys CLI - Password Mode for [" + keyName + "]"))
-	
+
 	p := prompt.New(
 		executorPassword,
 		completerPassword,
@@ -286,7 +286,7 @@ func executorPassword(in string) {
 				algo = a[1:]
 			}
 		}
-		
+
 		fmt.Print("Enter password value: ")
 		fd := int(os.Stdin.Fd())
 		pwdBytes, err := term.ReadPassword(fd)
@@ -316,7 +316,7 @@ func executorPassword(in string) {
 		var rawText []byte
 		algo := "aes-gcm"
 		target := ""
-		
+
 		for _, a := range args[1:] {
 			if strings.HasPrefix(a, "-") {
 				algo = a[1:]
@@ -345,7 +345,7 @@ func executorPassword(in string) {
 			}
 			rawText = txtBytes
 		}
-		
+
 		encData, err := encryptEphemeral(activeKey, activeIV, algo, rawText)
 		if err != nil {
 			fmt.Println(shell.Red("Encryption failed: " + err.Error()))
@@ -358,7 +358,7 @@ func executorPassword(in string) {
 			fmt.Println(shell.Red("用法: decrypt <路径|密文> [-算法]"))
 			return
 		}
-		
+
 		target := ""
 		algo := "aes-gcm"
 		for _, a := range args[1:] {
@@ -403,7 +403,7 @@ func completerPassword(d prompt.Document) []prompt.Suggest {
 	text := d.TextBeforeCursor()
 	args := strings.Split(text, " ")
 	w := d.GetWordBeforeCursor()
-	
+
 	if len(args) <= 1 {
 		s := []prompt.Suggest{
 			{Text: "list", Description: "列出该密钥下的所有密码项"},
@@ -462,7 +462,7 @@ func completerPassword(d prompt.Document) []prompt.Suggest {
 			return prompt.FilterHasPrefix(getAlgos(), w, true)
 		}
 	}
-	
+
 	return []prompt.Suggest{}
 }
 
@@ -481,9 +481,9 @@ func encryptEphemeral(key, iv []byte, algo string, data []byte) ([]byte, error) 
 	case "aes-cbc":
 		sym, err = crypto.NewAESCBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
 	case "sm4-gcm":
-		sym, err = sm.NewSM4GCMWithoutEraseKey(k, v)
+		sym, err = sm.NewSM4GCMWithoutEraseKey(k[:16], v)
 	case "sm4-cbc":
-		sym, err = sm.NewSM4CBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
+		sym, err = sm.NewSM4CBCWithoutEraseKey(k[:16], append(v, 0, 0, 0, 0))
 	default:
 		return nil, fmt.Errorf("unknown algorithm: %s", algo)
 	}
@@ -491,6 +491,7 @@ func encryptEphemeral(key, iv []byte, algo string, data []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+	defer sym.Close()
 	return sym.EncryptBytes(data)
 }
 
@@ -509,9 +510,9 @@ func decryptEphemeral(key, iv []byte, algo string, data []byte) ([]byte, error) 
 	case "aes-cbc":
 		sym, err = crypto.NewAESCBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
 	case "sm4-gcm":
-		sym, err = sm.NewSM4GCMWithoutEraseKey(k, v)
+		sym, err = sm.NewSM4GCMWithoutEraseKey(k[:16], v)
 	case "sm4-cbc":
-		sym, err = sm.NewSM4CBCWithoutEraseKey(k, append(v, 0, 0, 0, 0))
+		sym, err = sm.NewSM4CBCWithoutEraseKey(k[:16], append(v, 0, 0, 0, 0))
 	default:
 		return nil, fmt.Errorf("unknown algorithm: %s", algo)
 	}
@@ -519,6 +520,7 @@ func decryptEphemeral(key, iv []byte, algo string, data []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+	defer sym.Close()
 	return sym.DecryptBytes(data)
 }
 
@@ -558,8 +560,8 @@ loop:
 		}
 	}
 
-	fmt.Print("\r\033[2K")      
-	fmt.Print("\033[1A\033[2K") 
+	fmt.Print("\r\033[2K")
+	fmt.Print("\033[1A\033[2K")
 	fmt.Print("\r\033[1A\033[2K")
 	fmt.Println(shell.Green("内容已安全擦除。"))
 }

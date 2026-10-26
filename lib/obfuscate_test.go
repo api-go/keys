@@ -1,24 +1,26 @@
-package lib
+package lib_test
 
 import (
 	"bytes"
 	"testing"
+
+	"apigo.cc/go/keys/lib"
 )
 
 func TestPackUnpackMemoryKey(t *testing.T) {
-	key, _ := CryptoRandBytes(32)
-	iv, _ := CryptoRandBytes(12)
+	key, _ := lib.CryptoRandBytes(32)
+	iv, _ := lib.CryptoRandBytes(12)
 
-	buf, err := PackMemoryKey(key, iv)
+	buf, err := lib.PackMemoryKey(key, iv)
 	if err != nil {
 		t.Fatalf("PackMemoryKey failed: %v", err)
 	}
 
-	if len(buf) != MemoryKeySize {
-		t.Fatalf("PackMemoryKey length = %d, want %d", len(buf), MemoryKeySize)
+	if len(buf) != lib.MemoryKeySize {
+		t.Fatalf("PackMemoryKey length = %d, want %d", len(buf), lib.MemoryKeySize)
 	}
 
-	unpackedKey, unpackedIv, err := UnpackMemoryKey(buf)
+	unpackedKey, unpackedIv, err := lib.UnpackMemoryKey(buf)
 	if err != nil {
 		t.Fatalf("UnpackMemoryKey failed: %v", err)
 	}
@@ -33,19 +35,19 @@ func TestPackUnpackMemoryKey(t *testing.T) {
 }
 
 func TestPackUnpackFileHeader(t *testing.T) {
-	salt, _ := CryptoRandBytes(16)
-	iv, _ := CryptoRandBytes(12)
+	salt, _ := lib.CryptoRandBytes(16)
+	iv, _ := lib.CryptoRandBytes(12)
 
-	header, padding, err := PackFileHeader(salt, iv)
+	header, padding, err := lib.PackFileHeader(salt, iv)
 	if err != nil {
 		t.Fatalf("PackFileHeader failed: %v", err)
 	}
 
-	if len(header) != FileHeaderSize {
-		t.Fatalf("PackFileHeader length = %d, want %d", len(header), FileHeaderSize)
+	if len(header) != lib.FileHeaderSize {
+		t.Fatalf("PackFileHeader length = %d, want %d", len(header), lib.FileHeaderSize)
 	}
 
-	unpackedSalt, unpackedIv, unpackedPadding, err := UnpackFileHeader(header)
+	unpackedSalt, unpackedIv, unpackedPadding, err := lib.UnpackFileHeader(header)
 	if err != nil {
 		t.Fatalf("UnpackFileHeader failed: %v", err)
 	}

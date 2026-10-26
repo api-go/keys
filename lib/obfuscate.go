@@ -55,13 +55,13 @@ func PackMemoryKey(key, iv []byte) ([]byte, error) {
 	// Offset_IV is stored at offsetK + 32
 	// Need space for IV (16). Max offset is ptr1Index - 16.
 	minOffsetIV := offsetK + 34 // Leave 2 bytes for offset and len
-	maxOffsetIV := 100 // Safe upper bound
+	maxOffsetIV := 100          // Safe upper bound
 	rangeIV := maxOffsetIV - minOffsetIV + 1
 
 	offsetIVByte := buf[offsetK+32]
 	offsetIV := minOffsetIV + (int(offsetIVByte) % rangeIV)
 	buf[offsetK+32] = byte(offsetIV)
-	
+
 	// IV Length is stored at offsetK + 33
 	buf[offsetK+33] = byte(len(iv))
 
@@ -90,15 +90,13 @@ func UnpackMemoryKey(buf []byte) (key, iv []byte, err error) {
 		return nil, nil, errors.New("invalid key offset")
 	}
 
-	key = make([]byte, 32)
-	copy(key, buf[offsetK:offsetK+32])
-
 	offsetIV := int(buf[offsetK+32])
 	ivLen := int(buf[offsetK+33])
-	if ivLen < 12 || ivLen > 16 || offsetIV+ivLen > ptr1Index {
+	if ivLen < 12 || ivLen > 16 || offsetIV < offsetK+34 || offsetIV+ivLen > ptr1Index {
 		return nil, nil, errors.New("invalid iv offset or length")
 	}
 
+	key = append([]byte(nil), buf[offsetK:offsetK+32]...)
 	iv = make([]byte, ivLen)
 	copy(iv, buf[offsetIV:offsetIV+ivLen])
 
@@ -124,7 +122,10 @@ func PackFileHeader(salt, iv []byte) (header []byte, cipherPadding int, err erro
 	token := make([]byte, 31)
 	copy(token[0:16], salt)
 	copy(token[16:28], iv)
-	randPad, _ := CryptoRandBytes(3)
+	randPad, err := CryptoRandBytes(3)
+	if err != nil {
+		return nil, 0, err
+	}
 	copy(token[28:31], randPad)
 
 	// Indicator at 255
