@@ -46,7 +46,13 @@ func SavePassword(keyName, pwdName string, data []byte, activeKey, activeIV []by
 	}
 
 	defer sym.Close()
-	encData, err := sym.EncryptBytes(data)
+	var encData []byte
+	switch strings.ToLower(algo) {
+	case "aes-gcm", "gcm", "":
+		encData, err = sym.EncryptBytesAutoIV(data)
+	default:
+		encData, err = sym.EncryptBytes(data)
+	}
 	if err != nil {
 		return err
 	}

@@ -492,6 +492,9 @@ func encryptEphemeral(key, iv []byte, algo string, data []byte) ([]byte, error) 
 		return nil, err
 	}
 	defer sym.Close()
+	if algo == "aes-gcm" {
+		return sym.EncryptBytesAutoIV(data)
+	}
 	return sym.EncryptBytes(data)
 }
 

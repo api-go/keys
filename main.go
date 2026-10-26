@@ -317,7 +317,19 @@ func handlePasswordCmd(keyName string, args []string) {
 			fmt.Println(shell.Red("算法初始化失败: " + err.Error()))
 			os.Exit(1)
 		}
-		enc, _ := sym.EncryptBytes(data)
+		var enc []byte
+		switch algo {
+		case "aes-gcm", "gcm", "":
+			enc, err = sym.EncryptBytesAutoIV(data)
+		default:
+			enc, err = sym.EncryptBytes(data)
+		}
+		sym.Close()
+		safe.ZeroMemory(data)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "加密失败: "+err.Error())
+			os.Exit(1)
+		}
 		fmt.Println(encoding.URLBase64(enc))
 	case op == "decrypt":
 		if target == "" {

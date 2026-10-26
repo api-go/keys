@@ -136,7 +136,7 @@ func CreateKeystore(name string, masterPassword []byte) (*KeySet, error) {
 	}
 
 	defer sym.Close()
-	encData, err := sym.EncryptBytes(memKeyBuf)
+	encData, err := sym.EncryptBytesAutoIV(memKeyBuf)
 	if err != nil {
 		return nil, err
 	}

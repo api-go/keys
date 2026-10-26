@@ -3,6 +3,24 @@
 Local key and password management with obfuscated integration code exports.
 See [the CLI guide](README.md) for commands and usage.
 
+## AES-GCM wire format
+
+Keystore/password writes and CLI/REPL AES-GCM encryption now produce
+`12-byte random IV || ciphertext || 16-byte tag`, without a custom header or
+padding. Existing file headers and exported key/IV callbacks remain intact.
+Readers accept both embedded-IV and legacy configured-IV ciphertext. Reading
+old files does not rewrite them; password updates write the new format.
+
+Upgrade receivers first; old versions cannot read new ciphertext. Retain exported
+IVs for legacy reads and stable derivation. Generated Go SetDefaultAES instances
+read both formats; new application writes should use EncryptBytesAutoIV,
+EncryptAutoIV or EncryptAndEraseAutoIV. KeySet.NewSymmetric retains its existing
+semantics: explicitly call EncryptBytesAutoIV for AES-GCM writes. CBC/SM4 options
+retain their existing formats. Rotate keys before 2^32 random-nonce encryptions
+across all processes, and consider new keys when migrating from nonce reuse.
+
+Release validation uses GOWORK=off with published crypto v1.5.9 and crypto-sm v1.5.8, without local replacements.
+
 ## Go integration
 
 Generated Go files use `package main` and call `crypto.SetDefaultAES` directly

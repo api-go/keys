@@ -2,6 +2,24 @@
 
 `@go/keys` 是一款基于 `@go/crypto` 和 `@go/safe` 构建的**现代化本地 KMS (Key Management System) 与密码管理器**。旨在提供极高安全标准的密钥全生命周期管理，并支持跨语言的安全代码集成。
 
+## AES-GCM 新格式（推荐）
+
+AES-GCM 的密钥文件、密码文件、CLI `encrypt` 和 REPL 临时加密统一写入
+`[12 字节随机 IV][密文][16 字节 tag]`，不含自定义格式头。原有文件头、混淆 Key/IV 布局和导出回调保持兼容。
+每次写入生成新 IV；新版本解密自动兼容内嵌 IV 和旧固定 IV 格式。
+已有文件读取不重写，旧密码项保存/更新后写为新格式。
+
+先升级接收端到支持该格式的 crypto，再使用新 keys 产生密文；旧版本不能读取新格式。
+跨语言端按上述布局调用标准 AES-GCM，tag 固定 16 字节，无块填充。
+导出的 IV 保留用于历史密文兼容和稳定密钥派生，不能作为新数据反复使用的 nonce。
+Go 导出的 SetDefaultAES 实例可读取两种格式；业务加密推荐显式调用
+`EncryptBytesAutoIV` / `EncryptAutoIV` / `EncryptAndEraseAutoIV`。
+`KeySet.NewSymmetric` 保留原 API 语义，AES-GCM 新写入应调用 `EncryptBytesAutoIV`。
+CBC 与 SM4 的显式算法选项保留原格式；不将无认证的 CBC 纳入格式自动探测。
+随机 nonce 每 key 跨进程累计不得超过 2^32 次加密；历史固定 IV 重复使用后建议换 key。
+
+正式依赖 crypto v1.5.9、crypto-sm v1.5.8；发布验证使用 `GOWORK=off`，无临时 replace。
+
 ## 🎯 设计哲学
 
 * **安全第一**：纯二进制存储，彻底抹除文件固定特征码；使用 `crypto/rand` 替代 `math/rand`；解密输出阅后即焚（10秒自动擦除）。

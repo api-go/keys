@@ -52,7 +52,7 @@ func main() {
  if err != nil { panic(err) }
  defer expected.Close()
  plain := []byte("keys export integration")
- encrypted, err := expected.EncryptBytes(plain)
+ encrypted, err := expected.EncryptBytesAutoIV(plain)
  if err != nil { panic(err) }
  decrypted, err := confAES.DecryptBytes(encrypted)
  if err != nil { panic(err) }

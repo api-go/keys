@@ -1,5 +1,22 @@
 # Test Report: @go/keys
 
+## v1.5.11 开发验证（已由下方正式依赖验证替代）（2026-10-26）
+
+Go 1.26.4 / darwin arm64 / Apple M3 Max。使用 GOWORK=off 与显式临时 replace：
+`apigo.cc/go/crypto => /Users/star/Case2/go/crypto`，其余依赖为已发布版本。
+`go test -v ./...`、`go test -bench=. ./...`、`go test -race ./...`、`go vet ./...` 均通过。
+通过 `go doc ./lib` 与源码核对导出 API，替代 getExports。
+
+新增覆盖：
+- 独立标准库 GCM 验证密钥文件、密码文件和 CLI 的 nonce/ciphertext/tag 布局。
+- 使用原格式生成真实旧密钥文件、密码文件和 CLI 密文，验证兼容读取；旧密码项更新输出新格式。
+- CLI 连续加密 nonce 不同、加解密往返；生成 Go 文件注入默认 AES 后读取新格式。
+- 原 CBC/SM4 存储回归、五语言实际执行/编译、代理/导出和认证/路径测试全部通过，无跳过。
+
+MakeCode 基准（µs/op）：Go 21.780 / PHP 21.188 / Java 24.813 / Python 21.880 / JS 21.166。
+加密路径与旧格式回退成本见 crypto/TEST.md 的 64 B、4 KiB、1 MiB 基准。
+
+
 ## v1.5.10 发布验证（2026-10-26）
 
 环境：Go 1.26.4、darwin/arm64、Apple M3 Max。
@@ -90,3 +107,19 @@
 
 - `go test -v ./...`
 - `go test -bench=. ./...`
+
+## v1.5.11 发布验证（2026-10-26）
+
+GOWORK=off，正式依赖 crypto v1.5.9，无 replace。`go test -v ./...`、`go test -bench=. ./...`、`go vet ./...`、`go mod verify` 通过。使用 `go doc` 与源码交叉核对 API，替代 getExports。现有回归覆盖本模块业务；新旧 GCM 格式、认证失败和性能基准见 crypto v1.5.9。
+
+本次功能测试无跳过。
+
+基准结果：
+```text
+BenchmarkKeptExport-16    	   13753	     87630 ns/op	    4264 B/op	      25 allocs/op
+BenchmarkMakeCode/go-16 	   54261	     22299 ns/op	   10695 B/op	     208 allocs/op
+BenchmarkMakeCode/php-16         	   54534	     21967 ns/op	    8991 B/op	     207 allocs/op
+BenchmarkMakeCode/java-16        	   49914	     23947 ns/op	   16605 B/op	     211 allocs/op
+BenchmarkMakeCode/python-16      	   53372	     21963 ns/op	    8821 B/op	     207 allocs/op
+BenchmarkMakeCode/js-16          	   54847	     21985 ns/op	    9215 B/op	     207 allocs/op
+```
