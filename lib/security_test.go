@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"apigo.cc/go/file"
-	"apigo.cc/go/keys/lib"
+	"github.com/api-go/file"
+	"github.com/api-go/keys/lib"
 )
 
 func TestKeystoreAuthentication(t *testing.T) {

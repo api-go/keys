@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/safe"
-	"apigo.cc/go/timer"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/safe"
+	"github.com/api-go/timer"
 )
 
 type Client struct{ root, endpoint string }

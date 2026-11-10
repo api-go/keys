@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"apigo.cc/go/file"
-	"apigo.cc/go/keys/lib"
+	"github.com/api-go/file"
+	"github.com/api-go/keys/lib"
 )
 
 func TestGoExportInitialization(t *testing.T) {
@@ -39,7 +39,7 @@ func TestGoExportInitialization(t *testing.T) {
 			mainCode := `package main
 import (
  "bytes"
- "apigo.cc/go/crypto"
+ "github.com/api-go/crypto"
 )
 var confAES *crypto.Symmetric
 var _ = func() bool {

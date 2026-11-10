@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"apigo.cc/go/file"
+	"github.com/api-go/file"
 )
 
 // GetKeysRootPath returns the root path for all keys and passwords.

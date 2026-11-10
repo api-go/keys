@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/file"
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/safe"
+	"github.com/api-go/crypto"
+	"github.com/api-go/file"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/safe"
 )
 
 func TestAutoIVStorageAndLegacyRead(t *testing.T) {

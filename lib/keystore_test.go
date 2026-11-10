@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"apigo.cc/go/keys/lib"
+	"github.com/api-go/keys/lib"
 )
 
 func TestKeystoreAndPassword(t *testing.T) {

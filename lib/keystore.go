@@ -4,10 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/crypto-sm"
-	"apigo.cc/go/file"
-	"apigo.cc/go/safe"
+	"github.com/api-go/crypto"
+	"github.com/api-go/crypto-sm"
+	"github.com/api-go/file"
+	"github.com/api-go/safe"
 )
 
 type KeySet struct {

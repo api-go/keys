@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"apigo.cc/go/crypto"
+	"github.com/api-go/crypto"
 	winio "github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 )

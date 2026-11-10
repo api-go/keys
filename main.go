@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"apigo.cc/go/encoding"
-	"apigo.cc/go/keys/internal/keyagent"
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/safe"
-	"apigo.cc/go/shell"
+	"github.com/api-go/encoding"
+	"github.com/api-go/keys/internal/keyagent"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/safe"
+	"github.com/api-go/shell"
 	"golang.org/x/term"
 )
 

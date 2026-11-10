@@ -1,3 +1,7 @@
+## [v1.5.12] - 2026-11-10
+
+- 迁移至 github.com/api-go/keys，同步内部模块路径与依赖。
+
 # Changelog: @go/keys
 
 ## [v1.5.11] - 2026-10-26
@@ -29,7 +33,7 @@
 - **依赖对齐**: 升级 `file` 至 `v1.5.8`。
 
 ## v1.5.6 (2026-09-05)
-- **依赖对齐**: 升级全部 `apigo.cc/go/*` 依赖至当前已发布版本。
+- **依赖对齐**: 升级全部 `github.com/api-go/*` 依赖至当前已发布版本。
 
 ## v1.5.5 (2026-09-04)
 - **仓库清理**: 忽略本地构建生成的 `keys_tool` 可执行文件。
@@ -74,7 +78,7 @@
 - **强化混淆 (Go)**: Go 语言导出模板现采用 `safe.EncryptChaCha20` 对密钥进行二次加密。
     - 引入 1KB 随机内存池 (`pool`)。
     - 密钥与 Salt 通过算法从内存池中动态提取，极大提升反编译难度。
-- **Legacy 迁移**: 完成从 `ssgo/tool/sskey` 到 `apigo.cc/go/keys` 的全面重构与迁移。
+- **Legacy 迁移**: 完成从 `ssgo/tool/sskey` 到 `github.com/api-go/keys` 的全面重构与迁移。
 ...
 - **跨语言加固**: 
     - Go 语言导出模板集成 `safe.LockMemory`、`safe.DecryptChaCha20` 与 `SecretPlaintext` 生命周期管理。

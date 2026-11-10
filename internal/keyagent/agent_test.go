@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"apigo.cc/go/file"
-	"apigo.cc/go/keys/internal/keyagent"
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/timer"
+	"github.com/api-go/file"
+	"github.com/api-go/keys/internal/keyagent"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/timer"
 )
 
 func TestAgentHelper(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/timer"
+	"github.com/api-go/crypto"
+	"github.com/api-go/timer"
 	"golang.org/x/sys/unix"
 )
 

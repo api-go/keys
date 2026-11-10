@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/file"
+	"github.com/api-go/crypto"
+	"github.com/api-go/file"
 )
 
 func TestAgentSocketAndMalformedRequests(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/timer"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/timer"
 )
 
 func TestExportCLI(t *testing.T) {

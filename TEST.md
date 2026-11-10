@@ -3,7 +3,7 @@
 ## v1.5.11 开发验证（已由下方正式依赖验证替代）（2026-10-26）
 
 Go 1.26.4 / darwin arm64 / Apple M3 Max。使用 GOWORK=off 与显式临时 replace：
-`apigo.cc/go/crypto => /Users/star/Case2/go/crypto`，其余依赖为已发布版本。
+`github.com/api-go/crypto => /Users/star/Case2/go/crypto`，其余依赖为已发布版本。
 `go test -v ./...`、`go test -bench=. ./...`、`go test -race ./...`、`go vet ./...` 均通过。
 通过 `go doc ./lib` 与源码核对导出 API，替代 getExports。
 
@@ -123,3 +123,13 @@ BenchmarkMakeCode/java-16        	   49914	     23947 ns/op	   16605 B/op	     2
 BenchmarkMakeCode/python-16      	   53372	     21963 ns/op	    8821 B/op	     207 allocs/op
 BenchmarkMakeCode/js-16          	   54847	     21985 ns/op	    9215 B/op	     207 allocs/op
 ```
+
+## GitHub migration validation (pending release)
+
+Module paths and internal dependency versions are migrated. Development verification uses GOWORK=off and explicit sibling replacements; remove these replacements before release. See migration validation logs for actual results. Existing unrelated working changes are preserved and require separate review.
+
+API inventory verification: `GOWORK=off go doc` succeeded; output retained in the migration validation directory. Source exports were preserved by the path migration.
+
+## GitHub release verification
+
+GOWORK=off go test -v ./... and go test -bench=. ./... passed using published GitHub dependencies, without local replacements. go mod verify passed.

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"text/template"
 
-	"apigo.cc/go/safe"
+	"github.com/api-go/safe"
 )
 
 var codeTemplates = map[string]string{
@@ -19,8 +19,8 @@ var codeTemplates = map[string]string{
 var goTpl = `package main
 
 import (
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/safe"
+	"github.com/api-go/crypto"
+	"github.com/api-go/safe"
 )
 
 func init() {

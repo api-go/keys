@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/crypto-sm"
-	"apigo.cc/go/encoding"
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/safe"
-	"apigo.cc/go/shell"
+	"github.com/api-go/crypto"
+	"github.com/api-go/crypto-sm"
+	"github.com/api-go/encoding"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/safe"
+	"github.com/api-go/shell"
 	"github.com/c-bata/go-prompt"
 	"golang.org/x/term"
 )

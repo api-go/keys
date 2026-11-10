@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/keys/lib"
-	"apigo.cc/go/safe"
-	"apigo.cc/go/timer"
+	"github.com/api-go/crypto"
+	"github.com/api-go/keys/lib"
+	"github.com/api-go/safe"
+	"github.com/api-go/timer"
 )
 
 type entry struct {

@@ -88,8 +88,8 @@ keys [db-prod]> decrypt db.mysql.root
 ## Go 应用接入
 
 导出的 Go 文件属于 `package main`，在 `init()` 中直接调用
-`crypto.SetDefaultAES`，无需声明 `setSSKey`。应用需依赖 `apigo.cc/go/crypto`
-与 `apigo.cc/go/safe`。原始混淆缓冲区在退出初始化时先擦除，再解锁内存。
+`crypto.SetDefaultAES`，无需声明 `setSSKey`。应用需依赖 `github.com/api-go/crypto`
+与 `github.com/api-go/safe`。原始混淆缓冲区在退出初始化时先擦除，再解锁内存。
 
 在包变量初始化阶段注册观察者，保证早于同包生成文件的所有 `init()`：
 
@@ -120,7 +120,7 @@ var _ = func() bool {
 - 密钥名必须为非隐藏的单个文件名；密码项允许相对多层目录，不允许绝对路径、`..`、反斜杠或冒号。实际读写限制在对应存储目录内；列表遇到符号链接会报错。
 - Unix 新建密钥/密码文件权限为 `0600`；密码文件更新时也收紧权限。Windows 权限取决于用户目录的 ACL，`0600` 不等于独立的 Windows ACL 策略。
 
-## Library API (`apigo.cc/go/keys/lib`)
+## Library API (`github.com/api-go/keys/lib`)
 
 - 密钥：`CreateKeystore`、`LoadKeystore`、`GetDefaultKeySet`、`RemoveKeystore`、`HasMasterPassword`；`KeySet.Close/GetRaw/NewSymmetric/SourceFingerprint`。`GetRaw` 返回明文副本，调用方负责 `safe.ZeroMemory`。
 - 密码项：`SavePassword`、`LoadPassword`、`RemovePassword`、`ListPasswords`；`PwdNameToPath` 仅返回输入，不执行权限验证。

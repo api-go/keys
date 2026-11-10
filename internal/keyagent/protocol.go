@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"apigo.cc/go/safe"
+	"github.com/api-go/safe"
 )
 
 const maxFrame = 64 * 1024

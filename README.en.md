@@ -24,7 +24,7 @@ Release validation uses GOWORK=off with published crypto v1.5.9 and crypto-sm v1
 ## Go integration
 
 Generated Go files use `package main` and call `crypto.SetDefaultAES` directly
-in `init()`. The application needs `apigo.cc/go/crypto` and `apigo.cc/go/safe`.
+in `init()`. The application needs `github.com/api-go/crypto` and `github.com/api-go/safe`.
 The original obfuscated buffer is erased before its memory is unlocked.
 Regenerate existing exports and remove the old application `setSSKey` adapter.
 

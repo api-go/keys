@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"apigo.cc/go/crypto"
-	"apigo.cc/go/crypto-sm"
-	"apigo.cc/go/safe"
+	"github.com/api-go/crypto"
+	"github.com/api-go/crypto-sm"
+	"github.com/api-go/safe"
 )
 
 // PwdNameToPath returns the name as is, allowing subdirectories via slashes.
