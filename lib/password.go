@@ -75,6 +75,15 @@ func SavePassword(keyName, pwdName string, data []byte, activeKey, activeIV []by
 
 // LoadPassword loads and decrypts a password value.
 func LoadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error) {
+	return loadPassword(keyName, pwdName, activeKey, activeIV, algo, false)
+}
+
+// LoadPasswordStrict returns decryption errors instead of decoy plaintext.
+func LoadPasswordStrict(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error) {
+	return loadPassword(keyName, pwdName, activeKey, activeIV, algo, true)
+}
+
+func loadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo string, strict bool) ([]byte, error) {
 	if err := validateItemName(pwdName); err != nil {
 		return nil, err
 	}
@@ -113,6 +122,9 @@ func LoadPassword(keyName, pwdName string, activeKey, activeIV []byte, algo stri
 	defer sym.Close()
 	dec, err := sym.DecryptBytes(cipherText)
 	if err != nil {
+		if strict {
+			return nil, err
+		}
 		// --- 🛡️ 诱饵模式 (Decoy Mode) 🛡️ ---
 		// 解密失败不报错，而是返回一段随机的 12-24 位字符
 		// 让攻击者无法确定是算法选错了、Key错了，还是密码本身就是这样。

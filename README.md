@@ -151,3 +151,33 @@ keys forget-key --all                # 清除当前密钥库的全部缓存，�
 - Windows 代理通信使用命名管道，显式 DACL 限定当前登录身份，拒绝远程连接，并双向校验对端进程登录身份；不写凭证文件。代理库已完成 Windows 编译检查，但 CLI 仍受上述 shell 依赖问题阻塞，未进行 Windows 实机验证。
 - `forget-key --all` 立即清理缓存；无任何缓存的代理空闲 30 秒后自动退出。缓存清除及正常退出会关闭 SafeBuf，异常进程退出由操作系统回收内存。
 - 权限边界是操作系统用户/登录身份；同一身份下其他进程及管理员不属于被隔离对象。
+
+## Go 自包含注入（v1.5.13）
+
+`keys export <name> go` / `lib.MakeCode("go", key, iv)` 输出自包含认证载荷，替代内嵌连续明文 key 的偏移缓冲区。要求 32 字节 key 和 12–16 字节 IV。生成器检查两个载荷均不含完整连续 key 或 IV，意外匹配时重新生成（最多 16 次，之后返回错误）。每次导出使用新随机材料，输入不被修改。
+
+生成代码依赖 safe v1.5.6 的 OpenSelfContained 和 crypto v1.5.11 的 SetDefaultAESFromSafeBuf。导入失败或重复安装时 panic，避免使用错误默认密钥；成功时默认 AES 接管 SafeBuf，不要在 init 中 defer Close。配置观察者仍须在包变量初始化阶段注册。载荷可跨进程使用，完整保留 IV 长度。
+
+**保护边界**：无需外部服务，恢复材料也在导出源码中；只提高静态提取成本，无法阻止离线逆向或运行时内存读取。认证用于检测损坏，不证明来源。请把生成文件仍视为秘密。PHP/Java/Python/JS 导出及密钥库文件格式不变，仍使用原偏移混淆格式。
+
+开发验证：GOWORK=off，go.mod 中 safe/crypto 的显式本地 replace 仅供本轮验收，发布前按 safe → crypto → keys 移除并切换正式版本。
+
+CLI 仅将已支持的算法名称识别为选项，`-` 开头的 URL-base64 密文可直接作为 decrypt 参数。
+
+CLI：所有命令支持 -h/--help，帮助在认证及文件访问前处理。--non-interactive 可放在任意位置，禁止 REPL 和密码提示；缺 MASTER_PASSWORD 立即失败。命令失败返回非零，CLI 解密失败仅向 stderr 报错，不输出诱饵。
+
+`lib.LoadPasswordStrict(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error)` returns authentication/decryption failures; CLI uses it. Existing LoadPassword retains the legacy decoy contract for compatibility.
+
+Development verification now replaces the complete pending dependency graph, not only safe/crypto. All absolute-path replacements are temporary and must be removed in dependency order before release.
+
+自动化示例（MASTER_PASSWORD 由调用环境预先提供）：
+
+```sh
+keys export --help
+keys --non-interactive export production go > setKeys.go
+keys --non-interactive production decrypt service/token
+```
+
+脚本应检查退出码；解密失败不产生 stdout 数据。没有配置主密码时，非交互模式直接失败，不读取终端密码。
+
+Release v1.5.13: verified with published dependencies and GOWORK=off; all temporary replacements have been removed. Earlier development-validation notes describe historical local checks.

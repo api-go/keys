@@ -19,41 +19,26 @@ var codeTemplates = map[string]string{
 var goTpl = `package main
 
 import (
-	"github.com/api-go/crypto"
-	"github.com/api-go/safe"
+ "github.com/api-go/crypto"
+ "github.com/api-go/safe"
 )
 
+// Self-contained obfuscation: all recovery material is embedded.
 func init() {
-	buf := []byte{ {{range $i, $v := .buf}}{{if $i}},{{end}}{{$v}}{{end}} }
-
-	// 锁定内存防止交换到磁盘
-	_ = safe.LockMemory(buf)
-	defer safe.UnlockMemory(buf)
-	defer safe.ZeroMemory(buf)
-
-	indicator := buf[127]
-	ptr1Index := 126
-	if indicator%2 != 0 {
-		ptr1Index = 125
-	}
-
-	offsetK := int(buf[ptr1Index])
-	key := buf[offsetK : offsetK+32]
-
-	offsetIV := int(buf[offsetK+32])
-	iv := buf[offsetIV : offsetIV+int(buf[offsetK+33])]
-
-	safeKey := safe.NewSafeBufAndErase(append([]byte(nil), key...))
-	safeIv := safe.NewSafeBufAndErase(append([]byte(nil), iv...))
-	defer safeKey.Close()
-	defer safeIv.Close()
-
-	pKey := safeKey.Open()
-	defer pKey.Close()
-	pIv := safeIv.Open()
-	defer pIv.Close()
-
-	crypto.SetDefaultAES(pKey.Data, pIv.Data)
+ keyPayload := []byte{ {{range $i, $v := .keyPayload}}{{if $i}},{{end}}{{$v}}{{end}} }
+ ivPayload := []byte{ {{range $i, $v := .ivPayload}}{{if $i}},{{end}}{{$v}}{{end}} }
+ defer safe.ZeroMemory(keyPayload)
+ defer safe.ZeroMemory(ivPayload)
+ key, err := safe.OpenSelfContained(keyPayload)
+ if err != nil { panic(err) }
+ iv, err := safe.OpenSelfContained(ivPayload)
+ if err != nil { key.Close(); panic(err) }
+ if err := crypto.SetDefaultAESFromSafeBuf(key, iv); err != nil {
+  key.Close()
+  iv.Close()
+  panic(err)
+ }
+ // Default AES owns key and iv after successful installation.
 }
 `
 
@@ -161,27 +146,41 @@ const initSSKey = (setSSKeyFunc) => {
 };
 `
 
-// MakeCode generates application integration code containing the dynamic obfuscated buffer.
+// MakeCode generates integration code. Go uses authenticated self-contained payloads;
+// other languages retain the legacy offset buffer. Neither format prevents offline recovery.
 func MakeCode(codeName string, key, iv []byte) (string, error) {
 	tpl := codeTemplates[codeName]
 	if tpl == "" {
 		return "", errors.New("tpl not exists: " + codeName)
 	}
 
-	// Re-pack into 128 byte dynamically obfuscated buffer
-	buf, err := PackMemoryKey(key, iv)
-	if err != nil {
-		return "", err
+	if len(key) != 32 || len(iv) < 12 || len(iv) > 16 {
+		return "", errors.New("export requires a 32-byte key and 12–16-byte IV")
 	}
-
-	defer safe.ZeroMemory(buf)
-
-	data := map[string]interface{}{
-		"buf": buf,
+	data := map[string]interface{}{}
+	if codeName == "go" {
+		keyPayload, err := makeSelfContainedPayload(key, key, iv)
+		if err != nil {
+			return "", err
+		}
+		defer safe.ZeroMemory(keyPayload)
+		ivPayload, err := makeSelfContainedPayload(iv, key, iv)
+		if err != nil {
+			return "", err
+		}
+		defer safe.ZeroMemory(ivPayload)
+		data["keyPayload"], data["ivPayload"] = keyPayload, ivPayload
+	} else {
+		buf, err := PackMemoryKey(key, iv)
+		if err != nil {
+			return "", err
+		}
+		defer safe.ZeroMemory(buf)
+		data["buf"] = buf
 	}
 
 	t := template.New(codeName)
-	t, err = t.Parse(tpl)
+	t, err := t.Parse(tpl)
 	if err != nil {
 		return "", err
 	}
@@ -194,4 +193,21 @@ func MakeCode(codeName string, key, iv []byte) (string, error) {
 	}
 
 	return out.String(), nil
+}
+
+// Reject even accidental occurrences of the original key or IV in either payload.
+func makeSelfContainedPayload(raw, key, iv []byte) ([]byte, error) {
+	secret := safe.NewSafeBuf(raw)
+	defer secret.Close()
+	for range 16 {
+		payload, err := safe.SealSelfContained(secret)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Contains(payload, key) && !bytes.Contains(payload, iv) {
+			return payload, nil
+		}
+		safe.ZeroMemory(payload)
+	}
+	return nil, errors.New("could not generate plaintext-free export payload")
 }

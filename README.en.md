@@ -120,3 +120,33 @@ the shell dependency noted above; Windows runtime behavior is unverified.
 No service, startup registration, or persistent credential is created. The trust
 boundary is the OS user/logon; it does not isolate other processes of that user
 or administrators.
+
+## Self-contained Go injection (v1.5.13)
+
+`keys export <name> go` / `lib.MakeCode("go", key, iv)` emits authenticated self-contained payloads instead of an offset buffer containing a continuous plaintext key. Inputs require a 32-byte key and a 12–16-byte IV and are left unchanged. Both payloads are checked for complete plaintext key/IV occurrences; accidental matches trigger regeneration, with an error after 16 attempts. Each export uses fresh randomness.
+
+Generated code requires pending safe v1.5.6 (OpenSelfContained) and crypto v1.5.11 (SetDefaultAESFromSafeBuf). Import or installation errors panic rather than silently using a default key. Successful installation transfers SafeBuf ownership to default AES: do not defer Close in init. Register configuration observers during package variable initialization. Payloads work across processes and preserve the full IV.
+
+All recovery material is embedded. This raises static extraction cost but cannot prevent offline recovery or runtime inspection. Authentication detects corruption, not a malicious source. Treat generated files as secrets. PHP/Java/Python/JS exports and keystore files retain the legacy formats.
+
+Development checks use GOWORK=off and explicit local safe/crypto replacements; remove replacements and adopt released versions in safe → crypto → keys order after acceptance.
+
+The CLI recognizes supported algorithm options only; URL-base64 ciphertext starting with `-` is accepted directly by decrypt.
+
+CLI: every command accepts -h/--help before authentication or filesystem access. --non-interactive disables REPL and password prompts; missing MASTER_PASSWORD fails immediately. Command failures return nonzero; CLI decryption failure reports to stderr without decoy output.
+
+`lib.LoadPasswordStrict(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error)` returns authentication/decryption failures; CLI uses it. Existing LoadPassword retains the legacy decoy contract for compatibility.
+
+Development verification now replaces the complete pending dependency graph, not only safe/crypto. All absolute-path replacements are temporary and must be removed in dependency order before release.
+
+Automation examples (provide MASTER_PASSWORD through the calling environment):
+
+```sh
+keys export --help
+keys --non-interactive export production go > setKeys.go
+keys --non-interactive production decrypt service/token
+```
+
+Check exit codes. Failed decryption produces no stdout data. Without a configured password, noninteractive mode fails without prompting.
+
+Release v1.5.13: verified with published dependencies and GOWORK=off; all temporary replacements have been removed. Earlier development-validation notes describe historical local checks.

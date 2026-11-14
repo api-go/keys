@@ -1,3 +1,33 @@
+## CLI 自动化验证（2026-11-14，v1.5.13 未发布）
+
+- 全部密钥、密码和系统命令的 -h/--help 在不存在的密钥及空 MASTER_PASSWORD 下成功，帮助不触发认证。
+- --non-interactive 禁止无命令或仅密钥名进入 REPL，缺密码不提示直接失败；验证创建密钥、密码项读写、导出及删除的完整自动化流程。
+- 未知命令、未知全局选项及无效密文返回非零；损坏的存储密码项解密失败，stdout 为空、stderr 有错误，不返回诱饵。
+- GOWORK=off 全量测试、基准与定向 race 通过；go doc ./lib 核对 LoadPasswordStrict。
+
+## v1.5.13 自包含 Go 导出验证
+
+环境：2026-11-14，Go 1.26.4，darwin/arm64，Apple M3 Max。
+
+验证命令：`GOWORK=off go test -v ./...`、`GOWORK=off go test -bench=. ./...`，均通过。`ai/tools/getExports` 不存在，使用 `GOWORK=off go doc` 与导出源码交叉核对新增 API。性能为本机单次测量，非 SLA。
+
+开发依赖：safe v1.5.6、crypto v1.5.11 显式 replace 到 `/Users/star/Case2/go/safe`、`/Users/star/Case2/go/crypto`（本轮v1.5.6 / v1.5.11）；timer 使用已发布 v1.5.2。发布前按依赖顺序移除替换并采用正式版本。
+
+覆盖：
+- AST 提取生成代码的两个载荷，检查均不含完整连续原始 key/IV，认证恢复并逐项比较；同输入多次导出不同。
+- 生成 Go 程序实际运行，12–16 字节 IV 全长度保留，观察者初始化及默认 AES 解密。
+- 单独编译不带预期明文常量的生成程序，在可执行文件中检查原始 key/IV 连续字节缺失；该检查只证明本次样本，不承诺任意程序二进制。
+- 损坏载荷使生成程序启动失败；未知语言、错误 key/IV 长度返回错误。
+- CLI 解密固定 `-` 前缀 URL-base64 密文、新旧 GCM 格式、代理授权、其他四种语言导出及 keystore 全量测试。
+- 定向 race：`-run 'TestGo(SelfContainedPayloads|ExportBinaryAndCorruption|ExportInitialization)|TestAutoIVCLI' ./...` 通过。
+
+| 基准 | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| MakeCode/go | 50344 | 15990 | 404 |
+| KeptExport | 132958 | 5227 | 25 |
+
+API：GOWORK=off go doc ./lib 与源码核对；MakeCode 签名不变，中英文 README 已说明 Go 导出所需新依赖和其他语言兼容边界。
+
 # Test Report: @go/keys
 
 ## v1.5.11 开发验证（已由下方正式依赖验证替代）（2026-10-26）
@@ -133,3 +163,25 @@ API inventory verification: `GOWORK=off go doc` succeeded; output retained in th
 ## GitHub release verification
 
 GOWORK=off go test -v ./... and go test -bench=. ./... passed using published GitHub dependencies, without local replacements. go mod verify passed.
+
+## 最终依赖图验证（2026-11-14，未发布）
+
+显式本地 replace 覆盖本轮待发布依赖链；GOWORK=off go mod tidy、go test -v ./...、go test -bench=. -benchtime=1x ./...。基准按固定 1 次采样，避免排除计时的昂贵准备阶段反复校准。本轮结果：[('tidy', '0'), ('test', '0'), ('bench', '0')]。0 为通过，其他结果待定位。
+
+固定一次采样的基准摘要（非稳定性能测量）：
+
+```text
+BenchmarkKeptExport-16    	       1	    198250 ns/op	    5296 B/op	      25 allocs/op
+BenchmarkMakeCode/go-16 	       1	     94833 ns/op	   18528 B/op	     408 allocs/op
+BenchmarkMakeCode/php-16         	       1	     53292 ns/op	   11528 B/op	     211 allocs/op
+```
+
+## v1.5.13 正式发布验证（2026-11-14）
+
+GOWORK=off；移除全部 replace，使用已发布依赖。go mod tidy、go test -v ./...、go test -bench=. ./...、go mod verify 均通过。API 工具不可用，使用 go doc 与源码核对。
+
+```text
+BenchmarkKeptExport-16    	    8492	    128847 ns/op	    5230 B/op	      25 allocs/op
+BenchmarkMakeCode/go-16 	   24097	     49627 ns/op	   15990 B/op	     404 allocs/op
+BenchmarkMakeCode/php-16         	   55174	     21786 ns/op	    8991 B/op	     207 allocs/op
+```

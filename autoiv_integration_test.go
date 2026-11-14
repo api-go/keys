@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/api-go/encoding"
+	"github.com/api-go/file"
 	"github.com/api-go/keys/lib"
 	"github.com/api-go/safe"
 )
@@ -63,9 +64,39 @@ func TestAutoIVCLI(t *testing.T) {
 	if run("decrypt", encoded) != string(plain) {
 		t.Fatal("new CLI decrypt")
 	}
+	// A nonce beginning with 0xf8 produces a '-' URL-base64 prefix deterministically.
+	nonce := bytes.Repeat([]byte{0xf8}, 12)
+	leadingDash := append(bytes.Clone(nonce), gcm.Seal(nil, nonce, plain, nil)...)
+	dashEncoded := encoding.URLBase64(leadingDash)
+	if !strings.HasPrefix(dashEncoded, "-") {
+		t.Fatal("missing regression prefix")
+	}
+	if run("decrypt", dashEncoded) != string(plain) {
+		t.Fatal("leading-dash ciphertext rejected")
+	}
 	legacy := gcm.Seal(nil, iv[:12], plain, nil)
 	if run("decrypt", encoding.URLBase64(legacy)) != string(plain) {
 		t.Fatal("legacy CLI decrypt")
+	}
+	// Stored ciphertext failures must not become successful decoys in CLI.
+	if err := lib.SavePassword("migration", "damaged", plain, key, iv, "aes-gcm"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(lib.GetPasswordPath("migration"), "damaged")
+	damaged, err := file.ReadBytes(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged[len(damaged)-1] ^= 1
+	if err := file.WriteBytes(path, damaged); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(tool, "--non-interactive", "migration", "decrypt", "damaged")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err == nil || stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("stored failure: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 	}
 	second, err := encoding.UnURLBase64(run("encrypt", string(plain)))
 	if err != nil || bytes.Equal(wire[:12], second[:12]) {

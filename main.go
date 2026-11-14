@@ -20,7 +20,16 @@ import (
 	"golang.org/x/term"
 )
 
+var nonInteractive bool
+
 func main() {
+	if prepareCLI() {
+		return
+	}
+	if err := validateCLIArgs(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if len(os.Args) < 2 {
 		interactiveKeystoreMode()
 		return
@@ -64,16 +73,16 @@ func main() {
 		case "-h", "--help", "-help":
 			printUsage()
 		case "-setpath":
-			if len(os.Args) < 3 {
-				fmt.Println(shell.Red("用法: keys -setpath <路径>"))
+			if len(os.Args) != 3 {
+				fmt.Fprintln(os.Stderr, shell.Red("用法: keys -setpath <路径>"))
 				os.Exit(1)
 			}
 			setPath(os.Args[2])
 		case "-status":
 			showStatus()
 		default:
-			fmt.Printf("%s: %s\n", shell.Red("未知选项"), arg1)
-			printUsage()
+			fmt.Fprintf(os.Stderr, "未知选项: %s\n", arg1)
+			os.Exit(1)
 		}
 		return
 	}
@@ -84,15 +93,15 @@ func main() {
 		handleListKeystores()
 		return
 	case "create":
-		if len(os.Args) < 3 {
-			fmt.Println(shell.Red("用法: keys create <密钥名>"))
+		if len(os.Args) != 3 {
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys create <密钥名>"))
 			os.Exit(1)
 		}
 		handleCreateKeystore(os.Args[2])
 		return
 	case "remove":
-		if len(os.Args) < 3 {
-			fmt.Println(shell.Red("用法: keys remove <密钥名>"))
+		if len(os.Args) != 3 {
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys remove <密钥名>"))
 			os.Exit(1)
 		}
 		handleRemoveKeystore(os.Args[2])
@@ -115,8 +124,8 @@ func main() {
 	if keyName != "default" {
 		ksPath := filepath.Join(lib.GetKeystorePath(), keyName)
 		if _, err := os.Stat(ksPath); err != nil {
-			fmt.Printf("%s: 密钥 '%s' 不存在。\n", shell.Red("错误"), keyName)
-			fmt.Println("使用 'keys list' 查看可用密钥。")
+			fmt.Fprintf(os.Stderr, "%s: 密钥 '%s' 不存在。\n", shell.Red("错误"), keyName)
+			fmt.Fprintln(os.Stderr, "使用 'keys list' 查看可用密钥。")
 			os.Exit(1)
 		}
 	}
@@ -134,12 +143,12 @@ func main() {
 func setPath(newPath string) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Println(shell.Red("无法获取用户主目录: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("无法获取用户主目录: "+err.Error()))
 		os.Exit(1)
 	}
 	err = os.WriteFile(filepath.Join(homeDir, ".keyspath"), []byte(newPath), 0600)
 	if err != nil {
-		fmt.Println(shell.Red("保存 .keyspath 失败: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("保存 .keyspath 失败: "+err.Error()))
 		os.Exit(1)
 	}
 	fmt.Println(shell.Green("存储路径已更新为: " + newPath))
@@ -158,6 +167,10 @@ func handleListKeystores() {
 	fmt.Printf("  - %s %s\n", shell.White("default"), shell.Yellow("(内置默认)"))
 
 	files, err := os.ReadDir(lib.GetKeystorePath())
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if err != nil {
 		fmt.Printf("共 1 个密钥\n")
 		return
@@ -177,7 +190,7 @@ func handleCreateKeystore(name string) {
 	defer safe.ZeroMemory(pwd)
 	ks, err := lib.CreateKeystore(name, pwd)
 	if err != nil {
-		fmt.Println(shell.Red("创建失败: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("创建失败: "+err.Error()))
 		os.Exit(1)
 	}
 	ks.Close()
@@ -186,7 +199,7 @@ func handleCreateKeystore(name string) {
 
 func handleRemoveKeystore(name string) {
 	if err := lib.RemoveKeystore(name); err != nil {
-		fmt.Println(shell.Red("删除失败: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("删除失败: "+err.Error()))
 		os.Exit(1)
 	}
 	fmt.Println(shell.Green("密钥 '" + name + "' 已删除。"))
@@ -245,24 +258,27 @@ func handlePasswordCmd(keyName string, args []string) {
 
 	ks, err := lib.LoadKeystore(keyName, pwd)
 	if err != nil {
-		fmt.Println(shell.Red("密钥解锁失败: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("密钥解锁失败: "+err.Error()))
 		os.Exit(1)
 	}
 	defer ks.Close()
 
 	key, iv, err := ks.GetRaw()
 	if err != nil {
-		fmt.Println(shell.Red("Key 提取失败: " + err.Error()))
+		fmt.Fprintln(os.Stderr, shell.Red("Key 提取失败: "+err.Error()))
 		os.Exit(1)
 	}
 
+	defer safe.ZeroMemory(key)
+	defer safe.ZeroMemory(iv)
 	algo := "aes-gcm"
 	target := ""
 	var pwdVal []byte
+	defer func() { safe.ZeroMemory(pwdVal) }()
 
 	// 提取参数中的算法和目标
 	for _, a := range args[1:] {
-		if strings.HasPrefix(a, "-") {
+		if isAlgorithmOption(a) {
 			algo = a[1:]
 		} else {
 			if target == "" {
@@ -275,46 +291,50 @@ func handlePasswordCmd(keyName string, args []string) {
 
 	switch {
 	case op == "list":
-		pwds, _ := lib.ListPasswords(keyName)
+		pwds, err := lib.ListPasswords(keyName)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		fmt.Printf("%s 保护的密码项:\n", shell.Cyan("'"+keyName+"'"))
 		for _, p := range pwds {
 			fmt.Println("  - " + p)
 		}
 	case op == "create":
 		if target == "" || len(pwdVal) == 0 {
-			fmt.Println(shell.Red("用法: keys <密钥名> create <路径> <值> [-算法]"))
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> create <路径> <值> [-算法]"))
 			os.Exit(1)
 		}
 		if err := lib.SavePassword(keyName, target, pwdVal, key, iv, algo); err != nil {
-			fmt.Println(shell.Red("保存失败: " + err.Error()))
+			fmt.Fprintln(os.Stderr, shell.Red("保存失败: "+err.Error()))
 			os.Exit(1)
 		}
 		fmt.Printf("%s (算法: %s)。\n", shell.Green("保存成功"), algo)
 	case op == "remove":
 		if target == "" {
-			fmt.Println(shell.Red("用法: keys <密钥名> remove <路径>"))
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> remove <路径>"))
 			os.Exit(1)
 		}
 		if err := lib.RemovePassword(keyName, target); err != nil {
-			fmt.Println(shell.Red("删除失败: " + err.Error()))
+			fmt.Fprintln(os.Stderr, shell.Red("删除失败: "+err.Error()))
 			os.Exit(1)
 		}
 		fmt.Println(shell.Green("删除成功。"))
 	case op == "encrypt":
 		if target == "" {
-			fmt.Println(shell.Red("用法: keys <密钥名> encrypt <路径|原文> [-算法]"))
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> encrypt <路径|原文> [-算法]"))
 			os.Exit(1)
 		}
 
 		// 尝试作为已有项加载
-		data, err := lib.LoadPassword(keyName, target, key, iv, "aes-gcm")
+		data, err := lib.LoadPasswordStrict(keyName, target, key, iv, "aes-gcm")
 		if err != nil || len(data) == 0 {
 			data = []byte(target)
 		}
 
 		sym, err := ks.NewSymmetric(algo)
 		if err != nil {
-			fmt.Println(shell.Red("算法初始化失败: " + err.Error()))
+			fmt.Fprintln(os.Stderr, shell.Red("算法初始化失败: "+err.Error()))
 			os.Exit(1)
 		}
 		var enc []byte
@@ -333,17 +353,18 @@ func handlePasswordCmd(keyName string, args []string) {
 		fmt.Println(encoding.URLBase64(enc))
 	case op == "decrypt":
 		if target == "" {
-			fmt.Println(shell.Red("用法: keys <密钥名> decrypt <路径|密文> [-算法]"))
+			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> decrypt <路径|密文> [-算法]"))
 			os.Exit(1)
 		}
 
-		dec, err := lib.LoadPassword(keyName, target, key, iv, algo)
+		dec, err := lib.LoadPasswordStrict(keyName, target, key, iv, algo)
 		if err != nil || len(dec) == 0 {
 			// 尝试作为原始密文解密
 			rawData, err2 := encoding.UnURLBase64(target)
 			if err2 == nil {
 				sym, err3 := ks.NewSymmetric(algo)
 				if err3 == nil {
+					defer sym.Close()
 					dec2, err4 := sym.DecryptBytes(rawData)
 					if err4 == nil {
 						fmt.Println(string(dec2))
@@ -351,19 +372,23 @@ func handlePasswordCmd(keyName string, args []string) {
 					}
 				}
 			}
-			// 🛡️ 诱饵模式: 完全失败打印随机字符
-			fmt.Println(string(lib.CryptoRandDecoy(12, 24)))
-			return
+			fmt.Fprintln(os.Stderr, "解密失败: 无效密文、密钥或算法")
+			os.Exit(1)
 		}
 		fmt.Println(string(dec))
 	default:
-		fmt.Printf("%s: %s\n", shell.Red("未知密码指令"), op)
+		fmt.Fprintf(os.Stderr, "未知密码指令: %s\n", op)
+		os.Exit(1)
 	}
 }
 
 func getMasterPassword() []byte {
 	if p := os.Getenv("MASTER_PASSWORD"); p != "" {
 		return []byte(p)
+	}
+	if nonInteractive || !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(os.Stderr, "缺少 MASTER_PASSWORD；非交互执行需要设置主密码")
+		os.Exit(1)
 	}
 	fmt.Fprint(os.Stderr, "输入主密码: ")
 	fd := int(os.Stdin.Fd())
@@ -382,6 +407,10 @@ func printUsage() {
 用法:
   keys                      启动交互式密钥管理 (Keystore Mode)
   keys <密钥名>             启动该密钥对应的交互式密码管理 (Password Mode)
+
+全局选项:
+  --non-interactive         禁止 REPL 和密码提示；需要密码时必须设置 MASTER_PASSWORD
+  任意命令 -h / --help      无需密钥和密码即可查询帮助
 
 管理密钥 (非交互):
   keys list                 列出所有密钥
@@ -475,5 +504,89 @@ func handleForgetKey(args []string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "内存缓存已清除")
+	return nil
+}
+
+// URL-base64 ciphertext may start with '-'; only recognized algorithm names are options.
+func isAlgorithmOption(value string) bool {
+	switch value {
+	case "-aes-gcm", "-gcm", "-aes-cbc", "-cbc", "-sm4-gcm", "-sm4", "-sm4-cbc":
+		return true
+	}
+	return false
+}
+
+// Help is resolved before filesystem access, authentication or agent startup.
+func prepareCLI() bool {
+	args := os.Args[1:]
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" || arg == "-help" {
+			printUsage()
+			return true
+		}
+	}
+	filtered := []string{os.Args[0]}
+	for _, arg := range args {
+		if arg == "--non-interactive" {
+			nonInteractive = true
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+	os.Args = filtered
+	if nonInteractive && (len(filtered) == 1 || (len(filtered) == 2 && !strings.HasPrefix(filtered[1], "-") && filtered[1] != "list")) {
+		fmt.Fprintln(os.Stderr, "非交互模式需要完整命令；使用 --help 查询用法")
+		os.Exit(1)
+	}
+	return false
+}
+
+func validateCLIArgs(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	required := -1
+	switch args[0] {
+	case "list", "-status":
+		required = 1
+	case "create", "remove", "-setpath":
+		required = 2
+	case "export":
+		required = 3
+	case "keep-key", "forget-key", "__keys-agent":
+		return nil
+	default:
+		if strings.HasPrefix(args[0], "-") {
+			return fmt.Errorf("未知选项: %s", args[0])
+		}
+		if len(args) == 1 {
+			return nil
+		}
+		count := 0
+		for _, arg := range args[2:] {
+			if !isAlgorithmOption(arg) {
+				count++
+			}
+		}
+		expected := -1
+		switch args[1] {
+		case "list":
+			expected = 0
+		case "create":
+			expected = 2
+		case "remove", "encrypt", "decrypt":
+			expected = 1
+		}
+		if expected < 0 {
+			return fmt.Errorf("未知密码指令: %s", args[1])
+		}
+		if count != expected {
+			return errors.New("参数数量错误；使用 -h 查询用法")
+		}
+		return nil
+	}
+	if len(args) != required {
+		return errors.New("参数数量错误；使用 -h 查询用法")
+	}
 	return nil
 }

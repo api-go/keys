@@ -4,13 +4,14 @@ go 1.25.0
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
-	github.com/api-go/crypto v1.5.10
-	github.com/api-go/crypto-sm v1.5.9
+	github.com/api-go/cast v1.5.9
+	github.com/api-go/crypto v1.5.11
+	github.com/api-go/crypto-sm v1.5.10
 	github.com/api-go/encoding v1.5.9
-	github.com/api-go/file v1.5.10
-	github.com/api-go/safe v1.5.5
+	github.com/api-go/file v1.5.11
+	github.com/api-go/safe v1.5.6
 	github.com/api-go/shell v1.5.9
-	github.com/api-go/timer v1.5.1
+	github.com/api-go/timer v1.5.2
 	github.com/c-bata/go-prompt v0.2.6
 	golang.org/x/sys v0.45.0
 	golang.org/x/term v0.43.0
@@ -19,7 +20,6 @@ require (
 require github.com/api-go/jsmod v1.5.6 // indirect
 
 require (
-	github.com/api-go/cast v1.5.9 // indirect
 	github.com/api-go/rand v1.5.5 // indirect
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/emmansun/gmsm v0.28.0 // indirect
