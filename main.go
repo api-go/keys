@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/api-go/encoding"
+	"github.com/api-go/cast"
 	"github.com/api-go/keys/internal/keyagent"
 	"github.com/api-go/keys/lib"
 	"github.com/api-go/safe"
@@ -53,12 +53,16 @@ func main() {
 		}
 		return
 	}
-	if arg1 == "keep-key" || arg1 == "forget-key" {
+	switch arg1 {
+	case "keep-key", "forget-key", "list-keep-key":
 		var err error
-		if arg1 == "keep-key" {
+		switch arg1 {
+		case "keep-key":
 			err = handleKeepKey(os.Args[2:])
-		} else {
+		case "forget-key":
 			err = handleForgetKey(os.Args[2:])
+		case "list-keep-key":
+			err = handleListKeptKeys()
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -137,6 +141,13 @@ func main() {
 	}
 
 	// 非交互式密码管理
+	if op := os.Args[2]; op == "encrypt" || op == "decrypt" {
+		if err := handleCipherCmd(keyName, op, os.Args[3:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	handlePasswordCmd(keyName, os.Args[2:])
 }
 
@@ -320,62 +331,6 @@ func handlePasswordCmd(keyName string, args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(shell.Green("删除成功。"))
-	case op == "encrypt":
-		if target == "" {
-			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> encrypt <路径|原文> [-算法]"))
-			os.Exit(1)
-		}
-
-		// 尝试作为已有项加载
-		data, err := lib.LoadPasswordStrict(keyName, target, key, iv, "aes-gcm")
-		if err != nil || len(data) == 0 {
-			data = []byte(target)
-		}
-
-		sym, err := ks.NewSymmetric(algo)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, shell.Red("算法初始化失败: "+err.Error()))
-			os.Exit(1)
-		}
-		var enc []byte
-		switch algo {
-		case "aes-gcm", "gcm", "":
-			enc, err = sym.EncryptBytesAutoIV(data)
-		default:
-			enc, err = sym.EncryptBytes(data)
-		}
-		sym.Close()
-		safe.ZeroMemory(data)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "加密失败: "+err.Error())
-			os.Exit(1)
-		}
-		fmt.Println(encoding.URLBase64(enc))
-	case op == "decrypt":
-		if target == "" {
-			fmt.Fprintln(os.Stderr, shell.Red("用法: keys <密钥名> decrypt <路径|密文> [-算法]"))
-			os.Exit(1)
-		}
-
-		dec, err := lib.LoadPasswordStrict(keyName, target, key, iv, algo)
-		if err != nil || len(dec) == 0 {
-			// 尝试作为原始密文解密
-			rawData, err2 := encoding.UnURLBase64(target)
-			if err2 == nil {
-				sym, err3 := ks.NewSymmetric(algo)
-				if err3 == nil {
-					defer sym.Close()
-					dec2, err4 := sym.DecryptBytes(rawData)
-					if err4 == nil {
-						fmt.Println(string(dec2))
-						return
-					}
-				}
-			}
-			fmt.Fprintln(os.Stderr, "解密失败: 无效密文、密钥或算法")
-			os.Exit(1)
-		}
-		fmt.Println(string(dec))
 	default:
 		fmt.Fprintf(os.Stderr, "未知密码指令: %s\n", op)
 		os.Exit(1)
@@ -386,19 +341,18 @@ func getMasterPassword() []byte {
 	if p := os.Getenv("MASTER_PASSWORD"); p != "" {
 		return []byte(p)
 	}
-	if nonInteractive || !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(os.Stderr, "缺少 MASTER_PASSWORD；非交互执行需要设置主密码")
+	if !nonInteractive && term.IsTerminal(int(os.Stdin.Fd())) {
+		password, err := readHidden(os.Stdin, "输入主密码: ")
+		if err == nil && len(password) != 0 {
+			return password
+		}
+		safe.ZeroMemory(password)
+		fmt.Fprintln(os.Stderr, "必须输入主密码")
 		os.Exit(1)
 	}
-	fmt.Fprint(os.Stderr, "输入主密码: ")
-	fd := int(os.Stdin.Fd())
-	password, err := term.ReadPassword(fd)
-	fmt.Fprintln(os.Stderr)
-	if err != nil || len(password) == 0 {
-		fmt.Fprintln(os.Stderr, "必须输入密码")
-		os.Exit(1)
-	}
-	return password
+	fmt.Fprintln(os.Stderr, "缺少 MASTER_PASSWORD；非交互执行需要设置主密码或先运行 keep-key")
+	os.Exit(1)
+	return nil
 }
 
 func printUsage() {
@@ -409,7 +363,7 @@ func printUsage() {
   keys <密钥名>             启动该密钥对应的交互式密码管理 (Password Mode)
 
 全局选项:
-  --non-interactive         禁止 REPL 和密码提示；需要密码时必须设置 MASTER_PASSWORD
+  --non-interactive         禁止 REPL 和密码提示；可用 keep-key 或 MASTER_PASSWORD 解锁
   任意命令 -h / --help      无需密钥和密码即可查询帮助
 
 管理密钥 (非交互):
@@ -417,7 +371,8 @@ func printUsage() {
   keys create <名>          创建新密钥
   keys remove <名>          删除密钥
   keys export <名> <语言>   导出混淆代码 (go, php, java, python, js)
-  keys keep-key <名> [--ttl 8h]  解锁并在内存中保留密钥（仅供导出）
+  keys keep-key <名> [--ttl 1d]  解锁并保留密钥，默认 24 小时
+  keys list-keep-key            查看当前密钥库内已保留的密钥及到期时间
   keys forget-key <名>          清除该密钥的内存缓存
   keys forget-key --all         清除当前密钥库的全部缓存并停止代理
 
@@ -425,8 +380,8 @@ func printUsage() {
   keys <密钥名> list        列出该密钥下的所有密码项
   keys <密钥名> create <项> <值> [-算法]  创建/更新项 (gcm/cbc/sm4/sm4-cbc)
   keys <密钥名> remove <项> 删除密码项
-  keys <密钥名> encrypt <项|原文> [-算法]   加密一段文本
-  keys <密钥名> decrypt <项|密文> [-算法]   解密并显示
+  keys <密钥名> encrypt [项|原文] [-算法]   省略输入时从终端隐藏读取或读标准输入
+  keys <密钥名> decrypt [项|密文] [-算法]   省略输入时从终端或标准输入读密文
 
 系统指令:
   keys -status              查看存储路径与统计状态
@@ -439,34 +394,25 @@ func printUsage() {
 }
 
 func handleKeepKey(args []string) error {
-	usage := errors.New("用法: keys keep-key <密钥名> [--ttl 8h]")
+	usage := errors.New("用法: keys keep-key <密钥名> [--ttl 1d]")
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		return usage
 	}
 	name := args[0]
 	options := flag.NewFlagSet("keep-key", flag.ContinueOnError)
 	options.SetOutput(os.Stderr)
-	ttlText := options.String("ttl", "", "可选有效期，例如 8h")
+	ttlText := options.String("ttl", "1d", "有效期，例如 8h 或 1d，默认 1d")
 	if err := options.Parse(args[1:]); err != nil {
 		return err
 	}
 	if options.NArg() != 0 {
 		return usage
 	}
-	var ttl time.Duration
-	ttlProvided := false
-	options.Visit(func(f *flag.Flag) {
-		if f.Name == "ttl" {
-			ttlProvided = true
-		}
-	})
-	if ttlProvided {
-		var err error
-		ttl, err = time.ParseDuration(*ttlText)
-		if err != nil || ttl <= 0 {
-			return errors.New("TTL 必须是正时长，例如 8h")
-		}
+	ttl, err := parseKeepTTL(*ttlText)
+	if err != nil {
+		return err
 	}
+
 	if name == "default" {
 		return errors.New("内置 default 密钥无需保留")
 	}
@@ -485,9 +431,56 @@ func handleKeepKey(args []string) error {
 	if err := client.Keep(ks, ttl, client.StartProcess); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "密钥已临时保留，仅用于导出:", name)
+	fmt.Fprintln(os.Stderr, "密钥已临时保留，可用于导出、加密和解密:", name)
 	return nil
 }
+
+// A day is a fixed 24-hour interval, independent of the local calendar.
+func parseKeepTTL(value string) (time.Duration, error) {
+	invalid := errors.New("TTL 必须是正时长，例如 8h 或 1d")
+	if daysText, ok := strings.CutSuffix(value, "d"); ok {
+		days := cast.Int64(daysText)
+		const day = 24 * time.Hour
+		if strings.Trim(daysText, "0123456789") != "" || days <= 0 || days > (1<<63-1)/int64(day) {
+			return 0, invalid
+		}
+		return time.Duration(days) * day, nil
+	}
+	ttl, err := time.ParseDuration(value)
+	if err != nil || ttl <= 0 {
+		return 0, invalid
+	}
+	return ttl, nil
+}
+
+func handleListKeptKeys() error {
+	client, err := keyagent.New(lib.GetKeysRootPath())
+	if err != nil {
+		return err
+	}
+	entries, err := client.List()
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		_, err := fmt.Fprintln(os.Stdout, "当前没有保留的密钥")
+		return err
+	}
+	if _, err := fmt.Fprintln(os.Stdout, "密钥名\t到期时间"); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		expiry := "无到期时间"
+		if !entry.Expires.IsZero() {
+			expiry = entry.Expires.Local().Format(time.RFC3339)
+		}
+		if _, err := fmt.Fprintf(os.Stdout, "%q\t%s\n", entry.Name, expiry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func handleForgetKey(args []string) error {
 	if len(args) != 1 {
 		return errors.New("用法: keys forget-key <密钥名> | --all")
@@ -534,7 +527,7 @@ func prepareCLI() bool {
 		}
 	}
 	os.Args = filtered
-	if nonInteractive && (len(filtered) == 1 || (len(filtered) == 2 && !strings.HasPrefix(filtered[1], "-") && filtered[1] != "list")) {
+	if nonInteractive && (len(filtered) == 1 || (len(filtered) == 2 && !strings.HasPrefix(filtered[1], "-") && filtered[1] != "list" && filtered[1] != "list-keep-key")) {
 		fmt.Fprintln(os.Stderr, "非交互模式需要完整命令；使用 --help 查询用法")
 		os.Exit(1)
 	}
@@ -547,7 +540,7 @@ func validateCLIArgs(args []string) error {
 	}
 	required := -1
 	switch args[0] {
-	case "list", "-status":
+	case "list", "list-keep-key", "-status":
 		required = 1
 	case "create", "remove", "-setpath":
 		required = 2
@@ -574,7 +567,12 @@ func validateCLIArgs(args []string) error {
 			expected = 0
 		case "create":
 			expected = 2
-		case "remove", "encrypt", "decrypt":
+		case "remove":
+			expected = 1
+		case "encrypt", "decrypt":
+			if count <= 1 {
+				return nil
+			}
 			expected = 1
 		}
 		if expected < 0 {

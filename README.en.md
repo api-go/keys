@@ -19,7 +19,7 @@ semantics: explicitly call EncryptBytesAutoIV for AES-GCM writes. CBC/SM4 option
 retain their existing formats. Rotate keys before 2^32 random-nonce encryptions
 across all processes, and consider new keys when migrating from nonce reuse.
 
-Release validation uses GOWORK=off with published crypto v1.5.9 and crypto-sm v1.5.8, without local replacements.
+Release validation uses GOWORK=off with published crypto v1.5.11 and crypto-sm v1.5.10, without local replacements.
 
 ## Go integration
 
@@ -59,7 +59,7 @@ application-owned. Managed runtimes cannot guarantee physical memory erasure.
 
 `keys export <name> <language>` writes source only to stdout, diagnostics to
 stderr, and exits nonzero on failure. `MASTER_PASSWORD` enables noninteractive
-use. Use `keep-key` for temporary export authorization; password files are not supported. Wrong master
+use. Use `keep-key` for temporary authorization for export and CLI encryption/decryption; password files are not supported. Wrong master
 passwords and invalid key files return errors rather than random keysets.
 Creation requires a nonempty password and never overwrites existing keys.
 
@@ -73,8 +73,8 @@ Windows ACL policy.
 
 ## Library API
 
-- Keys: `CreateKeystore`, `LoadKeystore`, `GetDefaultKeySet`, `RemoveKeystore`, `HasMasterPassword`; `KeySet.Close/GetRaw/NewSymmetric/SourceFingerprint`. Erase the plaintext copies returned by `GetRaw`.
-- Passwords: `SavePassword`, `LoadPassword`, `RemovePassword`, `ListPasswords`, `PwdNameToPath` (identity conversion only).
+- Keys: `CreateKeystore`, `LoadKeystore`, `OpenMemoryKeySet`, `GetDefaultKeySet`, `RemoveKeystore`, `HasMasterPassword`; `KeySet.Close/GetRaw/NewSymmetric/SourceFingerprint`. Erase the plaintext copies returned by `GetRaw`. Call `Close` on temporary keysets returned by `OpenMemoryKeySet`.
+- Passwords: `SavePassword`, `LoadPassword`, `LoadPasswordStrict`, `RemovePassword`, `ListPasswords`, `PwdNameToPath` (identity conversion only).
 - Exports/format: `MakeCode`, `PackMemoryKey`, `UnpackMemoryKey`, `PackFileHeader`, `UnpackFileHeader`; constants `MemoryKeySize`, `FileHeaderSize`, `DefaultKey`, `DefaultIV`. Generated source contains recoverable key material.
 - Paths/status: `GetKeysRootPath`, `GetKeystorePath`, `GetPasswordBasePath`, `GetPasswordPath`, `EnsureDir`, `GetStatus`. Path constructors do not authorize file access.
 - Random helpers: `CryptoRandBytes`, `CryptoRandDecoy`.
@@ -83,30 +83,31 @@ SM4 uses the first 16 bytes of the master key (128-bit SM4 key); AES uses all 32
 
 Platform validation: tests ran on macOS. The library cross-compiles for Windows; the CLI currently fails to build because shell v1.5.8 has unguarded Unix system calls. Windows CLI support is not verified.
 
-## Temporary export authorization
+## Temporary key authorization
 
 ```sh
 keys keep-key xxx
 keys export xxx go > setKeys.go
-keys keep-key xxx --ttl 8h
+keys list-keep-key
+keys keep-key xxx --ttl 1d
 keys forget-key xxx
 keys forget-key --all
 ```
 
 `keep-key` validates the master password and starts a per-user background agent
-when needed. Other terminals can export the authorized key without prompting.
-The default lifetime ends when the agent exits or the computer restarts; an
-optional positive TTL expires access immediately, with background erasure on a
-one-second scan. Keeping the key again replaces its cache and deadline.
+when needed. Other terminals can use the same authorization.
+The default lifetime is 24 hours. Set `--ttl` to a positive duration like `8h`,
+`24h`, or `1d`. Whole days are fixed 24-hour intervals. Keeping the key again
+refreshes its deadline. The agent clears authorization on exit or reboot.
+`list-keep-key` shows active key names and expiration times for the current store.
 
-Only export uses this authorization. Password commands retain their normal
-master-password requirement. Cache misses fall back to MASTER_PASSWORD or a
-terminal prompt; noninteractive commands without credentials fail. Authorization
+Export and CLI encryption/decryption use this authorization. Creating, removing,
+and listing password items still require the master password. Authorization
 is scoped to the canonical keystore root and key name; `forget-key --all` applies to
 the current store and stops that agent. Empty agents exit after 30 idle seconds.
 
 The agent holds unlocked Key/IV in SafeBuf, never receives the master password,
-and is launched without MASTER_PASSWORD in its environment. Every export checks
+and is launched without MASTER_PASSWORD in its environment. Every cached operation checks
 the encrypted source file fingerprint. Changes or deletion invalidate the cache.
 `KeySet.SourceFingerprint` identifies the source snapshot used when loading or
 creating a key; it is not an authentication credential.
@@ -129,15 +130,11 @@ Generated code requires pending safe v1.5.6 (OpenSelfContained) and crypto v1.5.
 
 All recovery material is embedded. This raises static extraction cost but cannot prevent offline recovery or runtime inspection. Authentication detects corruption, not a malicious source. Treat generated files as secrets. PHP/Java/Python/JS exports and keystore files retain the legacy formats.
 
-Development checks use GOWORK=off and explicit local safe/crypto replacements; remove replacements and adopt released versions in safe → crypto → keys order after acceptance.
-
 The CLI recognizes supported algorithm options only; URL-base64 ciphertext starting with `-` is accepted directly by decrypt.
 
-CLI: every command accepts -h/--help before authentication or filesystem access. --non-interactive disables REPL and password prompts; missing MASTER_PASSWORD fails immediately. Command failures return nonzero; CLI decryption failure reports to stderr without decoy output.
+CLI: every command accepts -h/--help before authentication or filesystem access. --non-interactive disables REPL and password prompts; key unlock uses an applicable keep-key cache or MASTER_PASSWORD. Command failures return nonzero; CLI decryption failure reports to stderr without decoy output.
 
 `lib.LoadPasswordStrict(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error)` returns authentication/decryption failures; CLI uses it. Existing LoadPassword retains the legacy decoy contract for compatibility.
-
-Development verification now replaces the complete pending dependency graph, not only safe/crypto. All absolute-path replacements are temporary and must be removed in dependency order before release.
 
 Automation examples (provide MASTER_PASSWORD through the calling environment):
 
@@ -149,4 +146,21 @@ keys --non-interactive production decrypt service/token
 
 Check exit codes. Failed decryption produces no stdout data. Without a configured password, noninteractive mode fails without prompting.
 
-Release v1.5.13: verified with published dependencies and GOWORK=off; all temporary replacements have been removed. Earlier development-validation notes describe historical local checks.
+### Hidden input and pipelines
+
+Run `keys default encrypt` from a terminal and press Enter after typing. The terminal hides the input. The command writes only ciphertext to stdout and sends prompts to stderr. Named keys support the same input mode.
+
+```sh
+secret_source | keys default encrypt > ciphertext
+keys default decrypt < ciphertext
+keys keep-key my-key
+keys list-keep-key
+secret_source | keys my-key encrypt > ciphertext
+keys my-key decrypt < ciphertext
+```
+
+Here, `secret_source` is a command that writes plaintext to stdout. Encryption preserves every input byte, including trailing newlines. Decryption from stdin trims surrounding whitespace from URL Base64 ciphertext and writes the exact plaintext bytes. Existing positional arguments still accept a saved item path, plaintext, or ciphertext. Arguments can appear in shell history and process listings.
+
+Kept keys authorize export and CLI encryption/decryption for the same user and store. Cipher commands obtain a temporary key through the protected local connection and clear it on exit. Piped or redirected stdin automatically disables prompts and requires `MASTER_PASSWORD` on a cache miss. Use `--non-interactive` to explicitly disable prompts when stdin is a terminal.
+
+If an older agent is still running after an upgrade, run `keys forget-key --all` and unlock the required keys again with the updated `keys keep-key`.

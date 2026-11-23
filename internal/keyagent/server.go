@@ -2,10 +2,12 @@ package keyagent
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -140,14 +142,14 @@ func (s *server) handle(conn net.Conn) {
 	if err := verifyPeer(conn, true); err != nil {
 		return
 	}
-	frame, err := readFrame(conn)
+	frame, err := readFrame(conn, maxFrame)
 	if err != nil {
 		return
 	}
 	defer safe.ZeroMemory(frame)
 	r, err := decodeRequest(frame)
 	if err != nil {
-		_ = writeFrame(conn, append([]byte{1}, []byte("invalid agent request")...))
+		_ = writeFrame(conn, append([]byte{1}, []byte("invalid agent request")...), maxFrame)
 		return
 	}
 	s.mu.Lock()
@@ -167,7 +169,7 @@ func (s *server) handle(conn net.Conn) {
 	reply := append([]byte{status}, data...)
 	defer safe.ZeroMemory(reply)
 	defer safe.ZeroMemory(data)
-	_ = writeFrame(conn, reply)
+	_ = writeFrame(conn, reply, replyLimit(r.Op))
 	if stop {
 		s.close()
 	}
@@ -193,7 +195,7 @@ func (s *server) apply(r request) ([]byte, error, bool) {
 		}
 		safe.ZeroMemory(key)
 		safe.ZeroMemory(iv)
-		if len(s.entries) >= 1024 && s.entries[r.Name] == nil {
+		if len(s.entries) >= maxEntries && s.entries[r.Name] == nil {
 			return nil, errors.New("too many kept keys"), false
 		}
 		s.remove(r.Name)
@@ -204,25 +206,19 @@ func (s *server) apply(r request) ([]byte, error, bool) {
 		s.entries[r.Name] = e
 		s.idleSince = time.Time{}
 		return nil, nil, false
-	case opExport:
+	case opExport, opUnlockCipher:
 		if !validName(r.Name) {
 			return nil, errors.New("invalid key name"), false
 		}
-		e := s.entries[r.Name]
+		e := s.activeEntry(r.Name)
 		if e == nil {
-			return nil, ErrNotKept, false
-		}
-		if !e.expires.IsZero() && !time.Now().Before(e.expires) {
-			s.remove(r.Name)
-			return nil, ErrNotKept, false
-		}
-		fingerprint, err := s.client.fingerprint(r.Name)
-		if err != nil || fingerprint != e.fingerprint {
-			s.remove(r.Name)
 			return nil, ErrNotKept, false
 		}
 		plain := e.secret.Open()
 		defer plain.Close()
+		if r.Op == opUnlockCipher {
+			return append([]byte(nil), plain.Data...), nil, false
+		}
 		key, iv, err := lib.UnpackMemoryKey(plain.Data)
 		if err != nil {
 			s.remove(r.Name)
@@ -235,6 +231,8 @@ func (s *server) apply(r request) ([]byte, error, bool) {
 			return nil, err, false
 		}
 		return []byte(code), nil, false
+	case opList:
+		return s.list(), nil, false
 	case opForget:
 		if !validName(r.Name) {
 			return nil, errors.New("invalid key name"), false
@@ -252,4 +250,45 @@ func (s *server) apply(r request) ([]byte, error, bool) {
 	default:
 		return nil, errors.New("unsupported agent operation"), false
 	}
+}
+
+// activeEntry checks expiration and the current keystore before any cached use.
+func (s *server) activeEntry(name string) *entry {
+	e := s.entries[name]
+	if e == nil {
+		return nil
+	}
+	if !e.expires.IsZero() && !time.Now().Before(e.expires) {
+		s.remove(name)
+		return nil
+	}
+	fingerprint, err := s.client.fingerprint(name)
+	if err != nil || fingerprint != e.fingerprint {
+		s.remove(name)
+		return nil
+	}
+	return e
+}
+
+func (s *server) list() []byte {
+	names := make([]string, 0, len(s.entries))
+	for name := range s.entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var result []byte
+	for _, name := range names {
+		e := s.activeEntry(name)
+		if e == nil {
+			continue
+		}
+		var expiry uint64
+		if !e.expires.IsZero() {
+			expiry = uint64(e.expires.Unix())
+		}
+		result = append(result, byte(len(name)))
+		result = binary.BigEndian.AppendUint64(result, expiry)
+		result = append(result, name...)
+	}
+	return result
 }

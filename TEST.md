@@ -1,3 +1,15 @@
+## v1.5.14 发布验证（2026-11-23）
+
+- 集成测试验证默认 24 小时和显式 `--ttl 1d` 的到期时间、无代理时的空列表、到期后从列表消失，以及无需 `--non-interactive` 的管道往返。
+- 在模块目录使用发布依赖运行 `go install .`，用 PATH 上的已安装命令在隔离密钥库中验证保留、查询及管道加解密。
+
+- macOS 伪终端验证 `keys default encrypt` 关闭输入回显，stdout 的密文可经 stdin 解回原文。
+- 集成测试覆盖默认密钥和 `keep-key` 保留的命名密钥，验证空 `MASTER_PASSWORD` 下的管道往返、字节保真、stdout 与 stderr 分离及 `forget-key` 后拒绝使用缓存。
+- `GOWORK=off go test -v ./...` 和 `GOWORK=off go test -bench=. ./...` 通过。
+
+- `ai/tools/getExports` 不可用，使用 `GOWORK=off go doc ./lib` 与源码核对 `OpenMemoryKeySet` 和 `LoadPasswordStrict`。已发布依赖通过 `go mod verify`。
+- macOS arm64（Apple M3 Max）基准，KeptExport 为 119.4 µs/op、5226 B/op、25 allocs/op。MakeCode 的 Go、PHP、Java、Python、JS 分别为 49.0、21.4、23.0、21.0、21.3 µs/op。
+
 ## CLI 自动化验证（2026-11-14，v1.5.13 未发布）
 
 - 全部密钥、密码和系统命令的 -h/--help 在不存在的密钥及空 MASTER_PASSWORD 下成功，帮助不触发认证。

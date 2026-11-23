@@ -1,6 +1,7 @@
 package keyagent
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -52,10 +53,10 @@ func (c *Client) call(r request) ([]byte, error) {
 		return nil, err
 	}
 	defer safe.ZeroMemory(frame)
-	if err := writeFrame(conn, frame); err != nil {
+	if err := writeFrame(conn, frame, maxFrame); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	data, err := readFrame(conn)
+	data, err := readFrame(conn, replyLimit(r.Op))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -66,6 +67,14 @@ func (c *Client) call(r request) ([]byte, error) {
 		}
 		if data[0] == 3 {
 			return nil, ErrUnavailable
+		}
+		if string(data[1:]) == "unsupported agent operation" {
+			switch r.Op {
+			case opUnlockCipher:
+				return nil, ErrUnavailable
+			case opList:
+				return nil, errors.New("旧版密钥代理不支持查询；请运行 keys forget-key --all 后重新保留密钥")
+			}
 		}
 		return nil, fmt.Errorf("key agent: %s", data[1:])
 	}
@@ -117,6 +126,47 @@ func (c *Client) Export(name, language string) (string, error) {
 	defer safe.ZeroMemory(data)
 	return string(data), nil
 }
+
+// UnlockCipher opens a temporary keyset for a cipher command. The caller closes it.
+func (c *Client) UnlockCipher(name string) (*lib.KeySet, error) {
+	data, err := c.call(request{Op: opUnlockCipher, Name: name})
+	if err != nil {
+		return nil, err
+	}
+	defer safe.ZeroMemory(data)
+	return lib.OpenMemoryKeySet(name, data)
+}
+
+type KeptKey struct {
+	Name    string
+	Expires time.Time
+}
+
+// List returns only names and expiration times for currently usable keys.
+func (c *Client) List() ([]KeptKey, error) {
+	data, err := c.call(request{Op: opList})
+	if errors.Is(err, errNotRunning) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var entries []KeptKey
+	for len(data) > 0 {
+		nameLen := int(data[0])
+		if nameLen == 0 || len(data) < 9+nameLen {
+			return nil, errors.New("invalid agent list response")
+		}
+		entry := KeptKey{Name: string(data[9 : 9+nameLen])}
+		if expiry := int64(binary.BigEndian.Uint64(data[1:9])); expiry != 0 {
+			entry.Expires = time.Unix(expiry, 0)
+		}
+		entries = append(entries, entry)
+		data = data[9+nameLen:]
+	}
+	return entries, nil
+}
+
 func (c *Client) Forget(name string, all bool) error {
 	if !all && !validName(name) {
 		return errors.New("invalid key name")

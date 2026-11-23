@@ -49,6 +49,17 @@ func (k *KeySet) GetRaw() ([]byte, []byte, error) {
 	return key, iv, nil
 }
 
+// OpenMemoryKeySet opens a temporary keyset from a packed, already-unlocked key.
+func OpenMemoryKeySet(name string, packed []byte) (*KeySet, error) {
+	key, iv, err := UnpackMemoryKey(packed)
+	if err != nil {
+		return nil, err
+	}
+	defer safe.ZeroMemory(key)
+	defer safe.ZeroMemory(iv)
+	return &KeySet{Name: name, buf: safe.NewSafeBuf(packed)}, nil
+}
+
 // NewSymmetric creates a symmetric cipher from the keyset using the specified algorithm.
 func (k *KeySet) NewSymmetric(algo string) (*crypto.Symmetric, error) {
 	key, iv, err := k.GetRaw()

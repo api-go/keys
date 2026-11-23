@@ -9,12 +9,16 @@ import (
 )
 
 const maxFrame = 64 * 1024
+const maxEntries = 1024
+const maxListFrame = 1 + maxEntries*(1+8+255)
 const (
 	opPing byte = iota
 	opKeep
 	opExport
 	opForget
 	opForgetAll
+	opUnlockCipher
+	opList
 )
 
 var errNotRunning = errors.New("key agent is not running")
@@ -23,13 +27,20 @@ var ErrNotKept = errors.New("key is not kept or has expired")
 
 // One bounded binary message per connection. Secret material never enters JSON,
 // command-line arguments, environment variables, or a persistent file.
-func readFrame(r io.Reader) ([]byte, error) {
+func replyLimit(op byte) uint32 {
+	if op == opList {
+		return maxListFrame
+	}
+	return maxFrame
+}
+
+func readFrame(r io.Reader, limit uint32) ([]byte, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, err
 	}
 	n := binary.BigEndian.Uint32(header[:])
-	if n == 0 || n > maxFrame {
+	if n == 0 || n > limit {
 		return nil, errors.New("invalid agent frame length")
 	}
 	data := make([]byte, n)
@@ -39,8 +50,8 @@ func readFrame(r io.Reader) ([]byte, error) {
 	}
 	return data, nil
 }
-func writeFrame(w io.Writer, data []byte) error {
-	if len(data) == 0 || len(data) > maxFrame {
+func writeFrame(w io.Writer, data []byte, limit uint32) error {
+	if len(data) == 0 || len(data) > int(limit) {
 		return errors.New("invalid agent frame length")
 	}
 	var header [4]byte

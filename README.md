@@ -18,7 +18,7 @@ Go 导出的 SetDefaultAES 实例可读取两种格式；业务加密推荐显�
 CBC 与 SM4 的显式算法选项保留原格式；不将无认证的 CBC 纳入格式自动探测。
 随机 nonce 每 key 跨进程累计不得超过 2^32 次加密；历史固定 IV 重复使用后建议换 key。
 
-正式依赖 crypto v1.5.9、crypto-sm v1.5.8；发布验证使用 `GOWORK=off`，无临时 replace。
+正式依赖 crypto v1.5.11、crypto-sm v1.5.10；发布验证使用 `GOWORK=off`，无临时 replace。
 
 ## 🎯 设计哲学
 
@@ -45,8 +45,8 @@ Keys CLI - 现代化本地 KMS 与密码管理器
   keys <keyname> list
   keys <keyname> create <pwd.path.name> <value>
   keys <keyname> remove <pwd.path.name>
-  keys <keyname> encrypt <pwd.path.name | raw_text>  (参数会出现在进程命令行中)
-  keys <keyname> decrypt <pwd.path.name | ciphertext>
+  keys <keyname> encrypt [密码项路径 | 原文] [-算法]
+  keys <keyname> decrypt [密码项路径 | 密文] [-算法]
 
 环境变量:
   KEYSPATH                  指定数据根目录 (默认依序检查 ~/.keyspath，再 fallback 到 ~/.keys)
@@ -115,15 +115,15 @@ var _ = func() bool {
 - Java：将文件命名为 `SSKeyStarter.java`，提供公开 `SSKeySetter.set(byte[], byte[])`，调用 `SSKeyStarter.init()`；初始化串行执行，成功一次后跳过，失败抛异常并允许重试。
 - Python：调用 `init_sskey(callback)`，参数为 `bytes`；JS：调用 `initSSKey(callback)`，参数为 `Uint8Array`。
 - PHP、Python、JS 缺回调或回调抛异常时明确失败。四种语言均清理本地混淆数组；传给回调的 Key/IV 由应用管理，不在回调返回后清零，以兼容保留参数的应用。托管语言不能保证物理内存擦除。
-- 非交互导出只在 stdout 输出源码；提示与错误输出到 stderr，失败退出码非零。可用 `MASTER_PASSWORD` 避免交互；没有终端且没有密码时失败。可通过下述 `keep-key` 临时授权导出；不提供密码文件。
+- 非交互导出只在 stdout 输出源码；提示与错误输出到 stderr，失败退出码非零。可用 `MASTER_PASSWORD` 避免交互；没有终端且没有密码时失败。可通过下述 `keep-key` 临时授权导出和 CLI 加解密；不提供密码文件。
 - 错误主密码、密钥文件认证失败或结构无效均返回错误，不返回随机 KeySet。密钥创建不允许空密码或覆盖现存文件，`default` 为保留内置名称。
 - 密钥名必须为非隐藏的单个文件名；密码项允许相对多层目录，不允许绝对路径、`..`、反斜杠或冒号。实际读写限制在对应存储目录内；列表遇到符号链接会报错。
 - Unix 新建密钥/密码文件权限为 `0600`；密码文件更新时也收紧权限。Windows 权限取决于用户目录的 ACL，`0600` 不等于独立的 Windows ACL 策略。
 
 ## Library API (`github.com/api-go/keys/lib`)
 
-- 密钥：`CreateKeystore`、`LoadKeystore`、`GetDefaultKeySet`、`RemoveKeystore`、`HasMasterPassword`；`KeySet.Close/GetRaw/NewSymmetric/SourceFingerprint`。`GetRaw` 返回明文副本，调用方负责 `safe.ZeroMemory`。
-- 密码项：`SavePassword`、`LoadPassword`、`RemovePassword`、`ListPasswords`；`PwdNameToPath` 仅返回输入，不执行权限验证。
+- 密钥：`CreateKeystore`、`LoadKeystore`、`OpenMemoryKeySet`、`GetDefaultKeySet`、`RemoveKeystore`、`HasMasterPassword`；`KeySet.Close/GetRaw/NewSymmetric/SourceFingerprint`。`GetRaw` 返回明文副本，调用方负责 `safe.ZeroMemory`。`OpenMemoryKeySet` 从已解锁的打包密钥创建临时对象，用完调用 `Close`。
+- 密码项：`SavePassword`、`LoadPassword`、`LoadPasswordStrict`、`RemovePassword`、`ListPasswords`；`PwdNameToPath` 仅返回输入，不执行权限验证。
 - 导出/格式：`MakeCode`、`PackMemoryKey`、`UnpackMemoryKey`、`PackFileHeader`、`UnpackFileHeader`；常量 `MemoryKeySize`、`FileHeaderSize`、`DefaultKey`、`DefaultIV`。导出源码包含可恢复的密钥，按密钥材料管理。
 - 路径/状态：`GetKeysRootPath`、`GetKeystorePath`、`GetPasswordBasePath`、`GetPasswordPath`、`EnsureDir`、`GetStatus`；路径构造函数本身不授权文件访问。
 - 随机：`CryptoRandBytes`、`CryptoRandDecoy`。
@@ -132,21 +132,22 @@ SM4 使用主密钥前 16 字节（SM4 固定要求 128 位密钥）；AES 使�
 
 平台验证：本轮已在 macOS 执行测试。lib 可交叉编译到 Windows；CLI 当前受 shell v1.5.8 的 Unix 系统调用平台隔离问题阻塞，尚不能标为 Windows 可用。
 
-## 临时保留密钥，免密码导出
+## 临时保留密钥，免密码导出和加解密
 
 ```sh
 keys keep-key xxx                 # 验证主密码，临时保留该密钥
 keys export xxx go > setKeys.go   # 另一个终端也可直接导出
-keys keep-key xxx --ttl 8h        # 可选有效期，重复执行会替换缓存及期限
+keys list-keep-key                # 查看当前密钥库的缓存和到期时间
+keys keep-key xxx --ttl 1d        # 显式指定有效期，支持 8h、24h、1d 等
 keys forget-key xxx                  # 立即清除指定密钥
 keys forget-key --all                # 清除当前密钥库的全部缓存，并停止代理
 ```
 
 - 首次 `keep-key` 自动启动当前用户的后台代理；不安装系统服务，不注册开机启动。
-- 默认保留到代理退出或电脑重启；崩溃后不会从磁盘恢复授权。设置 `--ttl` 后，到期立即拒绝导出，后台清理的最大正常扫描间隔为一秒。
+- 默认保留 24 小时。可用 `--ttl` 指定有效期，`1d` 表示连续 24 小时，支持整数天。重复保留同一密钥会刷新期限。代理退出或电脑重启会清除授权，到期后立即拒绝使用缓存。
 - 授权按密钥库的规范绝对路径及密钥名隔离。`forget-key --all` 只影响当前 `KEYSPATH`（或默认路径）对应的代理。改变存储路径后需重新授权。
-- 缓存只供 `keys export` 使用；创建、删除、读取密码项及加解密命令仍使用原有主密码流程。没有缓存时，导出回退到 `MASTER_PASSWORD` 或终端输入；非交互且无凭证则失败。
-- 代理保存 SafeBuf 保护的已解锁 Key/IV，不接收或保存主密码；启动时移除继承的 `MASTER_PASSWORD` 环境变量。每次导出检查原加密密钥文件的 SHA-256 指纹，文件变化或缺失即删除对应缓存；再次 `keep-key` 必须重新验证密码。
+- 缓存供 `keys export` 和 CLI 的 `encrypt`、`decrypt` 使用。密码项的创建、删除和列出仍需主密码。
+- 代理保存 SafeBuf 保护的已解锁 Key/IV，不接收或保存主密码；启动时移除继承的 `MASTER_PASSWORD` 环境变量。每次使用缓存时检查原加密密钥文件的 SHA-256 指纹，文件变化或缺失即删除对应缓存；再次 `keep-key` 必须重新验证密码。
 - macOS/Linux 使用临时目录中当前用户拥有的 `0700` 私有目录、`0600` Unix socket，并双向验证连接对端 UID。目录中的空 `.lock` 文件只用于内核独占锁，没有密钥或口令；进程退出/重启后锁失效，残留文件不恢复授权。
 - Windows 代理通信使用命名管道，显式 DACL 限定当前登录身份，拒绝远程连接，并双向校验对端进程登录身份；不写凭证文件。代理库已完成 Windows 编译检查，但 CLI 仍受上述 shell 依赖问题阻塞，未进行 Windows 实机验证。
 - `forget-key --all` 立即清理缓存；无任何缓存的代理空闲 30 秒后自动退出。缓存清除及正常退出会关闭 SafeBuf，异常进程退出由操作系统回收内存。
@@ -160,15 +161,11 @@ keys forget-key --all                # 清除当前密钥库的全部缓存，�
 
 **保护边界**：无需外部服务，恢复材料也在导出源码中；只提高静态提取成本，无法阻止离线逆向或运行时内存读取。认证用于检测损坏，不证明来源。请把生成文件仍视为秘密。PHP/Java/Python/JS 导出及密钥库文件格式不变，仍使用原偏移混淆格式。
 
-开发验证：GOWORK=off，go.mod 中 safe/crypto 的显式本地 replace 仅供本轮验收，发布前按 safe → crypto → keys 移除并切换正式版本。
-
 CLI 仅将已支持的算法名称识别为选项，`-` 开头的 URL-base64 密文可直接作为 decrypt 参数。
 
-CLI：所有命令支持 -h/--help，帮助在认证及文件访问前处理。--non-interactive 可放在任意位置，禁止 REPL 和密码提示；缺 MASTER_PASSWORD 立即失败。命令失败返回非零，CLI 解密失败仅向 stderr 报错，不输出诱饵。
+CLI：所有命令支持 -h/--help，帮助在认证及文件访问前处理。--non-interactive 可放在任意位置，禁止 REPL 和密码提示；需要解锁时使用适用的 keep-key 缓存或 MASTER_PASSWORD。命令失败返回非零，CLI 解密失败仅向 stderr 报错，不输出诱饵。
 
 `lib.LoadPasswordStrict(keyName, pwdName string, activeKey, activeIV []byte, algo string) ([]byte, error)` returns authentication/decryption failures; CLI uses it. Existing LoadPassword retains the legacy decoy contract for compatibility.
-
-Development verification now replaces the complete pending dependency graph, not only safe/crypto. All absolute-path replacements are temporary and must be removed in dependency order before release.
 
 自动化示例（MASTER_PASSWORD 由调用环境预先提供）：
 
@@ -180,4 +177,22 @@ keys --non-interactive production decrypt service/token
 
 脚本应检查退出码；解密失败不产生 stdout 数据。没有配置主密码时，非交互模式直接失败，不读取终端密码。
 
-Release v1.5.13: verified with published dependencies and GOWORK=off; all temporary replacements have been removed. Earlier development-validation notes describe historical local checks.
+
+### 隐藏输入与管道加解密
+
+在终端运行 `keys default encrypt`，输入内容后按回车。终端不会回显输入，密文写入 stdout，提示写入 stderr。命名密钥也支持这一用法。
+
+```sh
+secret_source | keys default encrypt > ciphertext
+keys default decrypt < ciphertext
+keys keep-key my-key
+keys list-keep-key
+secret_source | keys my-key encrypt > ciphertext
+keys my-key decrypt < ciphertext
+```
+
+`secret_source` 代表将原文写入 stdout 的命令。加密会保留标准输入的所有字节，包括末尾换行。解密从标准输入读取 URL Base64 密文，忽略密文首尾空白并原样写出解密内容。位置参数仍可用于密码项路径、原文或密文，参数可能进入 shell 历史和进程命令行。
+
+在同一用户和存储根目录下，`keep-key` 可供导出及 CLI 的 `encrypt`、`decrypt` 使用。加解密命令通过受保护的本地连接取得临时密钥，退出时清理。stdin 接入管道或重定向时自动禁用提示。缓存失效时，管道执行需要 `MASTER_PASSWORD`。终端仍可显式用 `--non-interactive` 禁用提示。
+
+升级后如仍在运行旧版代理，执行 `keys forget-key --all`，再用新版 `keys keep-key` 重新解锁所需密钥。
